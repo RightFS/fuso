@@ -1,6 +1,13 @@
-use std::{ops::Deref, sync::Arc};
+use std::{
+    fmt::Display,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    ops::Deref,
+    sync::Arc,
+};
 
 use serde::{Deserialize, Serialize};
+
+use crate::error;
 
 pub mod client;
 pub mod server;
@@ -38,7 +45,7 @@ pub enum BootKind {
 #[serde(rename_all = "lowercase")]
 pub enum Crypto {
     Aes,
-    Rsa
+    Rsa,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -52,14 +59,26 @@ pub struct KeepAlive {
     interval: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum IP {
+    V6,
+    V4,
+}
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(into = "String")]
+#[serde(try_from = "String")]
+pub enum Expose {
+    Kcp(IP, u16),
+    Tcp(IP, u16),
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum RestartPolicy{
+pub enum RestartPolicy {
     Never,
     Always,
-    Counter
+    Counter,
 }
 
 impl Default for BootKind {
@@ -68,23 +87,23 @@ impl Default for BootKind {
     }
 }
 
-impl Default for RestartPolicy{
+impl Default for RestartPolicy {
     fn default() -> Self {
         RestartPolicy::Always
     }
 }
 
-pub struct Stateful<C>{
-    pub conf: Arc<C>
+pub struct Stateful<C> {
+    pub conf: Arc<C>,
 }
 
-impl<C> Stateful<C>{
-    pub fn new(c: C) -> Self{
+impl<C> Stateful<C> {
+    pub fn new(c: C) -> Self {
         Self { conf: Arc::new(c) }
     }
 }
 
-impl<C> Deref for Stateful<C>{
+impl<C> Deref for Stateful<C> {
     type Target = Arc<C>;
 
     fn deref(&self) -> &Self::Target {
@@ -92,13 +111,65 @@ impl<C> Deref for Stateful<C>{
     }
 }
 
-impl<C> Clone for Stateful<C>{
+impl<C> Clone for Stateful<C> {
     fn clone(&self) -> Self {
-        Stateful { conf: self.conf.clone() }
+        Stateful {
+            conf: self.conf.clone(),
+        }
     }
 }
 
+impl TryFrom<String> for Expose {
+    type Error = error::FusoError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let lower = value.to_lowercase();
 
-pub(crate) fn default_auth_timeout() -> u32{
+        let (port, ty) = match lower.split_once("/") {
+            None => (value.as_str(), "tcp"),
+            Some(r) => r,
+        };
+
+        let port = u16::from_str_radix(port, 10).map_err(|_| error::FusoError::InvalidPort)?;
+
+        Ok({
+            match ty {
+                "kcp/v6" => Self::Kcp(IP::V6, port),
+                "tcp/v6" => Self::Tcp(IP::V6, port),
+                "kcp" | "kcp/v4" => Self::Kcp(IP::V4, port),
+                "tcp" | "tcp/v4" => Self::Tcp(IP::V4, port),
+                _ => return Err(error::FusoError::InvalidExposeType),
+            }
+        })
+    }
+}
+
+impl From<Expose> for String {
+    fn from(expose: Expose) -> Self {
+        match expose {
+            Expose::Kcp(ip, port) => format!("{port}/kcp/{ip}"),
+            Expose::Tcp(ip, tcp) => format!("{tcp}/tcp/{ip}"),
+        }
+    }
+}
+
+impl Display for IP {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IP::V6 => write!(f, "v6"),
+            IP::V4 => write!(f, "v4"),
+        }
+    }
+}
+
+impl IP {
+    pub fn to_addr(&self, port: u16) -> SocketAddr {
+        match self {
+            IP::V4 => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)),
+            IP::V6 => SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0)),
+        }
+    }
+}
+
+pub(crate) fn default_auth_timeout() -> u32 {
     60
 }

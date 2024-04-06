@@ -9,6 +9,8 @@ pub enum FusoError {
     Abort,
     AuthError,
     BadRpcCall(u64),
+    InvalidPort,
+    InvalidExposeType,
     Bincode(bincode::Error),
     TomlDeError(toml::de::Error),
     StdIo(std::io::Error),

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     config::{
         client::WithForwardService, AuthWithAccount, AuthWithSecret, Authentication, Compress,
-        Crypto,
+        Crypto, Expose,
     },
     core::{
         protocol::{AsyncPacketRead, AsyncPacketSend},
@@ -29,8 +29,8 @@ pub enum ClientConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ForwardConfig {
-    pub exposes: Vec<u16>,
-    pub channel: Option<u16>,
+    pub exposes: HashSet<Expose>,
+    pub channel: Option<HashSet<Expose>>,
     pub cryptos: HashSet<Crypto>,
     pub compress: HashSet<Compress>,
 }
@@ -84,7 +84,7 @@ pub trait Handshake: Stream + Send + Unpin {
                 match auth {
                     Authentication::None => Ok(self),
                     Authentication::Secret(secret) => {
-                        log::debug!("using secret auth");
+                        log::trace!("using secret auth");
 
                         let client_secret: AuthWithSecret = self.recv_packet().await?.decode()?;
                         if client_secret.ne(&secret) {
@@ -96,7 +96,7 @@ pub trait Handshake: Stream + Send + Unpin {
                         }
                     }
                     Authentication::Account(account) => {
-                        log::debug!("using account auth");
+                        log::trace!("using account auth");
 
                         let client_account: AuthWithAccount = self.recv_packet().await?.decode()?;
                         if client_account.ne(&account) {

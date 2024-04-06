@@ -70,10 +70,10 @@ impl kcp_rust::Runner for KcpWithTokioRuntime {
     type Err = error::FusoError;
 
     fn start(process: kcp_rust::Background) -> std::result::Result<(), Self::Err> {
-        log::debug!("starting {:?}", process.kind());
         crate::runtime::tokio::TokioRuntime::spawn(async move{
-          process.await.unwrap();
-          log::debug!("kcp finished ....")
+          if let Err(e) = process.await {
+              log::warn!("{:?}", e);
+          }
         });
         Ok(())
     }

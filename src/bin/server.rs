@@ -1,18 +1,18 @@
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     str::FromStr,
     time::Duration,
 };
 
 use bincode::de;
 use fuso::{
-    config::{client::WithForwardService, server::Config, Stateful},
+    config::{client::WithForwardService, server::Config, Expose, Stateful},
     core::{
         accepter::{AccepterExt, MultiAccepter, StreamAccepter, TaggedAccepter},
         future::Select,
         handshake::Handshaker,
         io::{AsyncReadExt, AsyncWriteExt, StreamExt},
-        net::TcpListener,
+        net::{KcpListener, TcpListener},
         processor::{IProcessor, Processor, StreamProcessor},
         protocol::{AsyncPacketRead, AsyncPacketSend},
         split::SplitStream,
@@ -27,6 +27,7 @@ use fuso::{
     runtime::tokio::TokioRuntime,
     server::port_forward::{ForwardAccepter, MuxAccepter, PortForwarder},
 };
+use kcp_rust::KcpConfig;
 
 #[derive(Debug, Clone)]
 pub enum Tagged {
@@ -202,25 +203,57 @@ where
 
     let mut accepter = MultiAccepter::new();
 
-    if let Some(port) = conf.channel {
-        accepter.add(ForwardAccepter::new(
-            TcpListener::bind(format!("0:{port}")).await?,
-        ));
+    if let Some(ref channels) = conf.channel {
+        for expose in channels {
+            match expose {
+                Expose::Kcp(ip, port) => {
+                    accepter.add(ForwardAccepter::new_visitor(
+                        KcpListener::bind(Default::default(), ip.to_addr(*port)).await?,
+                    ));
+                }
+                Expose::Tcp(ip, port) => accepter.add(ForwardAccepter::new_visitor(
+                    TcpListener::bind(ip.to_addr(*port)).await?,
+                )),
+            }
+        }
     }
 
-    let mut multi_mux_accepter = MultiAccepter::new();
+    if conf.channel.is_some() {
+        for expose in conf.exposes.iter() {
+            match expose {
+                Expose::Tcp(ip, port) => {
+                    accepter.add(ForwardAccepter::new_visitor(
+                        TcpListener::bind(ip.to_addr(*port)).await?,
+                    ));
+                }
+                Expose::Kcp(ip, port) => {
+                    accepter.add(ForwardAccepter::new_visitor({
+                        KcpListener::bind(Default::default(), ip.to_addr(*port)).await?
+                    }));
+                }
+            }
+        }
+    } else {
+        accepter.add({
+            let mut accepter = MultiAccepter::new();
+            for expose in conf.exposes.iter() {
+                match expose {
+                    Expose::Tcp(ip, port) => {
+                        accepter.add(StreamAccepter::new(
+                            TcpListener::bind(ip.to_addr(*port)).await?,
+                        ));
+                    }
+                    Expose::Kcp(ip, port) => {
+                        accepter.add(StreamAccepter::new({
+                            KcpListener::bind(Default::default(), ip.to_addr(*port)).await?
+                        }));
+                    }
+                }
+            }
 
-    for port in conf.exposes.iter() {
-        multi_mux_accepter.add(StreamAccepter::new(
-            TcpListener::bind(format!("0:{port}")).await?,
-        ));
+            MuxAccepter::new(1110, rand::random(), accepter)
+        });
     }
-
-    let mux_accepter = MuxAccepter::new(1110, rand::random(), {
-        StreamAccepter::new(multi_mux_accepter)
-    });
-
-    accepter.add(mux_accepter);
 
     let mut forwarder = PortForwarder::new(transport, accepter, (), None);
 
@@ -230,6 +263,6 @@ where
         let (c1, c2) = forwarder.accept().await?;
     }
 
-
     Ok(())
 }
+ 

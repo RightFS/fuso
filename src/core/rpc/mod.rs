@@ -4,6 +4,7 @@ mod caller;
 pub mod structs;
 
 use std::{
+    future::Future,
     marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
@@ -13,6 +14,8 @@ use crate::error;
 
 pub use callee::*;
 pub use caller::*;
+
+use super::future::Select;
 
 #[pin_project::pin_project]
 pub struct Call<'caller, C, A, O> {
@@ -26,6 +29,12 @@ pub trait AsyncCall<T> {
     type Output;
 
     fn poll_call(self: Pin<&mut Self>, cx: &mut Context<'_>, arg: &T) -> Poll<Self::Output>;
+}
+
+pub trait AsyncCallee {
+    type Output;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
 }
 
 pub trait ICallExt<A, O>: AsyncCall<A, Output = O> {
@@ -51,6 +60,8 @@ pub trait Decoder<T> {
 }
 
 impl<T, A, O> ICallExt<A, O> for T where T: AsyncCall<A, Output = O> {}
+
+pub struct Looper<'looper>(Select<'looper, error::Result<()>>);
 
 impl<T> Encoder<T> for T
 where
@@ -84,5 +95,18 @@ where
     ) -> std::task::Poll<Self::Output> {
         let mut this = self.project();
         Pin::new(&mut **this.caller).poll_call(cx, &this.arg)
+    }
+}
+
+impl<'looper> Looper<'looper> {
+    fn new() -> Self {
+        Self(Select::new())
+    }
+
+    fn post<F>(&mut self, f: F)
+    where
+        F: Future<Output = error::Result<()>> + Send + 'looper,
+    {
+        self.0.add(f);
     }
 }

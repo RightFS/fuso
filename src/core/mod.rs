@@ -15,7 +15,6 @@ pub mod future;
 pub mod handshake;
 pub mod io;
 pub mod net;
-pub mod port_forward;
 pub mod processor;
 pub mod protocol;
 pub mod rpc;

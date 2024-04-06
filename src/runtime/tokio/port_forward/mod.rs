@@ -36,11 +36,12 @@ where
     }
 }
 
-impl crate::client::port_forward::PortForwarder<TokioRuntime> {
-    pub fn new<S, C>(transport: S, connector: C) -> Self
-    where
-        S: Stream + Unpin + Send + 'static,
-    {
-        Self::new_with_runtime(transport, connector)
+impl<S> crate::client::port_forward::PortForwarder<TokioRuntime, S>
+where
+    S: Stream + Send + Unpin + 'static,
+{
+    pub fn new<C>(transport: S, connector: C) -> Self {
+        // Self::new_with_runtime(transport, connector)
+        unimplemented!()
     }
 }

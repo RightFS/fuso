@@ -1,6 +1,7 @@
 mod accepter;
 mod handshake;
 mod preprocessor;
+mod transport;
 
 pub use accepter::*;
 pub use handshake::*;
@@ -14,8 +15,7 @@ use std::{collections::HashMap, pin::Pin, sync::Arc, task::Poll};
 
 use crate::core::future::Poller;
 use crate::core::io::AsyncReadExt;
-use crate::core::port_forward::Transport;
-use crate::core::rpc::structs::port_forward;
+use crate::core::rpc::structs::port_forward::{self, Target};
 use crate::core::rpc::ICallExt;
 use crate::core::token::IncToken;
 use crate::core::Stream;
@@ -29,6 +29,8 @@ use crate::{
     },
     error,
 };
+
+use self::transport::Transport;
 
 type Connection = crate::core::Connection<'static>;
 
@@ -209,10 +211,13 @@ where
         let mut transport = transport;
 
         let (conn, addr) = match preprocessor.prepare(conn).await? {
-            VisitorProtocol::Other(conn, addr) => (conn, addr),
             VisitorProtocol::Socks(conn, socks) => match socks {
-                port_forward::WithSocks::Tcp(addr) => (conn, Some(addr)),
-                port_forward::WithSocks::Udp() => todo!(),
+                port_forward::WithSocks::Tcp(addr) => (conn, Some(Target::Tcp(addr))),
+                port_forward::WithSocks::Udp(addr) => (conn, Some(Target::Udp(addr))),
+            },
+            VisitorProtocol::Other(conn, addr) => match addr {
+                None => (conn, None),
+                Some(addr) => (conn, Some(Target::Tcp(addr))),
             },
         };
 

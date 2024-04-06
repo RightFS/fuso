@@ -21,7 +21,7 @@ use fuso::{
     },
     error,
     runner::{FnRunnable, NamedRunnable, Rise, ServiceRunner},
-    runtime::tokio::TokioRuntime,
+    runtime::{tokio::TokioRuntime, Runtime},
 };
 
 fn main() {
@@ -118,7 +118,7 @@ async fn enter_forward_service_main(
     let mut connector = MultiConnector::<usize, usize>::new();
 
     if let Some(channel) = service.channel.as_ref() {
-        // connector.add();
+        // connector.add(connector)
     }
 
     let mut forwarder = PortForwarder::new(stream, connector);
@@ -127,12 +127,13 @@ async fn enter_forward_service_main(
         let (linker, target) = forwarder.accept().await?;
 
         tokio::spawn(async move {
+
+            
             let a = linker.link().await;
         });
     }
-
-    
 }
+
 
 
 

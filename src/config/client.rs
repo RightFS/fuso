@@ -9,7 +9,10 @@ use crate::error;
 
 use serde::{Deserialize, Serialize};
 
-use super::{default_auth_timeout, Authentication, BootKind, Compress, Crypto, KeepAlive, RestartPolicy};
+use super::{
+    default_auth_timeout, Authentication, BootKind, Compress, Crypto, Expose, KeepAlive,
+    RestartPolicy,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -43,7 +46,7 @@ pub struct Server {
     pub authentication: Authentication,
     #[serde(rename = "auth_timeout")]
     #[serde(default = "default_auth_timeout")]
-    pub authentication_timeout: u32
+    pub authentication_timeout: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -76,12 +79,12 @@ pub struct WithForwardService {
     pub keep_alive: Option<KeepAlive>,
     /// 服务端对外暴露的端口， 可以填写多个, 确保端口没有被占用
     /// 如果没有填写，那么随机分配，这时请确保防火墙中该随机端口被允许访问
-    #[serde(default = "Default::default")]
-    pub exposes: Vec<u16>,
+    #[serde(default = "default_exposes")]
+    pub exposes: HashSet<Expose>,
     /// 与服务器建立连接时的端口
     /// 该字段是可选的, 如果没有填写, 将会使用`exposes`字段中的端口来建立连接
     /// 如果填写了0, 那么会随机分配一个端口，这时请确保防火墙中该随机端口被允许访问
-    pub channel: Option<u16>,
+    pub channel: Option<HashSet<Expose>>,
     /// 加密方式
     #[serde(default = "Default::default")]
     pub crypto: HashSet<Crypto>,
@@ -142,6 +145,11 @@ pub struct WithHttpHeaderRewrite {
 pub enum FinalTarget {
     /// 静态地址
     Static { addr: ServerAddr, port: u16 },
+    Executable {
+        path: String,
+        #[serde(default = "Default::default")]
+        args: Vec<String>,
+    },
     /// 当该地址是一个动态地址时, 代理模式将会变为socks5
     Dynamic,
 }
@@ -224,7 +232,7 @@ impl Default for Config {
                 crypto: Default::default(),
                 compress: Default::default(),
                 authentication: Authentication::None,
-                authentication_timeout: default_auth_timeout()
+                authentication_timeout: default_auth_timeout(),
             },
             features: Default::default(),
             services: Default::default(),
@@ -238,7 +246,7 @@ impl Config {
     pub fn check(&self) -> error::Result<()> {
         let mut bind_ports = Vec::new();
 
-        let mut remote_ports = self.server.ports.clone();
+        let remote_ports = self.server.ports.clone();
 
         for (name, service) in &self.services {
             match service {
@@ -263,6 +271,15 @@ impl Config {
     }
 }
 
+
+/// 默认随机分配一个端口
+fn default_exposes() -> HashSet<Expose> {
+    let mut exposes = HashSet::new();
+
+    exposes.insert(Expose::Tcp(super::IP::V4, 0));
+
+    exposes
+}
 
 #[cfg(test)]
 #[cfg(feature = "fuso-toml")]

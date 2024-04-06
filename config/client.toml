@@ -12,20 +12,20 @@ auth = { type = "secret", secret = "12345678" }
 [ssh1]
 type = "forward"
 boot = "fork"
-exposes = [8082]
-channel = 6777
+exposes = [ "8080/tcp" ]
+channel = [ "8002/tcp", "8002/kcp" ]
 restart = "always"
 target = { type = "static", port = 2222, addr = ["127.0.0.1"] }
 keep_alive = { interval = 100 }
 
-[ssh2]
+
+[executable]
 type = "forward"
 boot = "fork"
-exposes = [8081]
-channel = 6771
-restart = "never"
-target = { type = "static", port = 2222, addr = ["127.0.0.1"] }
-keep_alive = { interval = 100 }
+exposes = [ "7888/tcp" ]
+restart = "always"
+target = { type = "executable", path = "/bin/bash" }
+
 
 [bridge1]
 type = "bridge"

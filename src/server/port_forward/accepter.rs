@@ -15,6 +15,11 @@ use crate::core::{accepter::Accepter, BoxedStream};
 use crate::error;
 use crate::runtime::Runtime;
 
+enum AcceptWhence {
+    Visitor,
+    Mapping,
+}
+
 pub struct MuxAccepter<R, A> {
     accepter: A,
     handshaker: Arc<Rc4MagicHandshake>,
@@ -23,6 +28,7 @@ pub struct MuxAccepter<R, A> {
 }
 
 pub struct ForwardAccepter<A> {
+    whence: AcceptWhence,
     accepter: A,
 }
 
@@ -122,8 +128,18 @@ where
     A: Accepter<Output = (SocketAddr, T)> + Unpin + Send,
     T: Stream + Unpin + 'static,
 {
-    pub fn new(accepter: A) -> Self {
-        Self { accepter }
+    pub fn new_visitor(accepter: A) -> Self {
+        Self {
+            accepter,
+            whence: AcceptWhence::Visitor,
+        }
+    }
+
+    pub fn new_mapping(accepter: A) -> Self {
+        Self {
+            accepter,
+            whence: AcceptWhence::Mapping,
+        }
     }
 }
 
@@ -140,10 +156,16 @@ where
     ) -> Poll<error::Result<Self::Output>> {
         match Pin::new(&mut self.accepter).poll_accept(ctx)? {
             Poll::Pending => Poll::Pending,
-            Poll::Ready((addr, stream)) => Poll::Ready(Ok(Whence::Mapping(Connection::new(
-                addr,
-                BoxedStream::new(stream),
-            )))),
+            Poll::Ready((addr, stream)) => Poll::Ready(Ok({
+                match self.whence {
+                    AcceptWhence::Visitor => {
+                        Whence::Visitor(Connection::new(addr, BoxedStream::new(stream)))
+                    }
+                    AcceptWhence::Mapping => {
+                        Whence::Mapping(Connection::new(addr, BoxedStream::new(stream)))
+                    }
+                }
+            })),
         }
     }
 }

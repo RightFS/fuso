@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     core::{
         channel::{self, Receiver, Sender},
-        future::{LazyFuture, Select},
+        future::LazyFuture,
         protocol::{AsyncPacketRead, AsyncPacketSend},
         split::{ReadHalf, WriteHalf},
         task::{setter, Setter},
@@ -17,7 +17,7 @@ use crate::{
     runtime::Runtime,
 };
 
-use super::{AsyncCall, Decoder};
+use super::{AsyncCall, Decoder, Looper};
 use crate::core::rpc::Encoder;
 use crate::core::split::SplitStream;
 
@@ -32,8 +32,6 @@ enum Response {
     Pong,
     Data { token: u64, data: Vec<u8> },
 }
-
-pub struct Looper<'a>(Select<'a, error::Result<()>>);
 
 #[derive(Default, Clone)]
 pub struct Calls {
@@ -63,20 +61,21 @@ where
         let (heart_rx, heart_ax) = channel::open::<Response>();
 
         let calls = Calls::default();
-        let mut select = Select::new();
 
-        select.add(Looper::run_heartbeat::<R>(
+        let mut looper = Looper::new();
+
+        looper.post(Looper::run_heartbeat::<R>(
             heartbeat_delay,
             req_rx.clone(),
             heart_ax,
         ));
 
-        select.add(Looper::run_send_loop(calls.clone(), reader, heart_rx));
+        looper.post(Looper::run_send_loop(calls.clone(), reader, heart_rx));
 
-        select.add(Looper::run_recv_loop(calls.clone(), writer, req_ax));
+        looper.post(Looper::run_recv_loop(calls.clone(), writer, req_ax));
 
         (
-            Looper(select),
+            looper,
             Self {
                 calls,
                 request: req_rx,
@@ -86,6 +85,7 @@ where
         )
     }
 }
+
 
 impl<'caller, S, T> AsyncCall<T> for Caller<S>
 where

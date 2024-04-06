@@ -4,10 +4,14 @@ pub mod port_forward {
     use crate::{config::client::ServerAddr, core::Connection};
 
     #[derive(Debug, Serialize, Deserialize)]
+    pub enum Target {
+        Udp(ServerAddr),
+        Tcp(ServerAddr),
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
     pub enum Request {
-        Ping,
-        Pong,
-        New(u64, Option<ServerAddr>),
+        New(u64, Option<Target>),
     }
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -18,7 +22,7 @@ pub mod port_forward {
 
     pub enum WithSocks {
         Tcp(ServerAddr),
-        Udp(),
+        Udp(ServerAddr),
     }
 
     pub enum VisitorProtocol {
