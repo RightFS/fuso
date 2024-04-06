@@ -41,8 +41,9 @@ pub struct EncryptedStream<'a> {
     crypto: BoxedCodec<'a>,
 }
 
-pub fn encrypt_stream<'a, S>(stream: S, cryptos: Vec<Crypto>) -> EncryptedStream<'a>
+pub fn encrypt_stream<'a, 'crypto, C, S>(stream: S, mut cryptos: C) -> EncryptedStream<'a>
 where
+    C: Iterator<Item = &'crypto Crypto>,
     S: AsyncRead + AsyncWrite + Send + Unpin + 'a,
 {
     fn use_crypto<'a>(crypto: &Crypto) -> BoxedCodec<'a> {
@@ -52,27 +53,25 @@ where
         }
     }
 
-    let crypto = if cryptos.is_empty() {
-        BoxedCodec(Box::new(EmptyCodec))
-    } else if cryptos.len() == 1 {
-        use_crypto(&cryptos[0])
-    } else {
-        let mut crypto = BoxedCodec(Box::new({
-            PairCodec {
-                first: use_crypto(&cryptos[0]),
-                second: use_crypto(&cryptos[1]),
-            }
-        }));
-
-        for crypto_type in &cryptos[2..] {
-            crypto = BoxedCodec(Box::new(PairCodec {
-                first: crypto,
-                second: use_crypto(crypto_type),
-            }))
-        }
-
-        crypto
+    let mut crypto = match cryptos.next() {
+        None => BoxedCodec(Box::new(EmptyCodec)),
+        Some(crypto) => match cryptos.next() {
+            None => use_crypto(&crypto),
+            Some(next) => BoxedCodec(Box::new({
+                PairCodec {
+                    first: use_crypto(&crypto),
+                    second: use_crypto(&next),
+                }
+            })),
+        },
     };
+
+    for crypto_type in cryptos {
+        crypto = BoxedCodec(Box::new(PairCodec {
+            first: crypto,
+            second: use_crypto(&crypto_type),
+        }))
+    }
 
     EncryptedStream {
         crypto,

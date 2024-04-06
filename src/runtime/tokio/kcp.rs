@@ -4,7 +4,7 @@ use tokio::io::ReadBuf;
 
 use crate::{
     core::{
-        future::StoredFuture,
+        future::LazyFuture,
         net::{BoxedDatagram, KcpListener},
         BoxedFuture,
     },
@@ -27,7 +27,7 @@ impl KcpListener {
         let listener = kcp_rust::KcpListener::new::<KcpWithTokioRuntime>(udp, conf)?;
         Ok(Self {
             inner: Arc::new(listener),
-            stored: StoredFuture::new(),
+            stored: LazyFuture::new(),
         })
     }
 }

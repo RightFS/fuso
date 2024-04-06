@@ -10,6 +10,7 @@ use rc4::{KeyInit, Rc4, StreamCipher};
 use super::{Connection, Rc4MagicHandshake, Whence};
 use crate::core::future::Poller;
 use crate::core::io::AsyncReadExt;
+use crate::core::Stream;
 use crate::core::{accepter::Accepter, BoxedStream};
 use crate::error;
 use crate::runtime::Runtime;
@@ -19,6 +20,10 @@ pub struct MuxAccepter<R, A> {
     handshaker: Arc<Rc4MagicHandshake>,
     connections: Poller<'static, error::Result<Whence>>,
     _marked: PhantomData<R>,
+}
+
+pub struct ForwardAccepter<A> {
+    accepter: A,
 }
 
 impl<R, A> Accepter for MuxAccepter<R, A>
@@ -108,6 +113,37 @@ where
                 expect: magic,
             }),
             _marked: PhantomData,
+        }
+    }
+}
+
+impl<A, T> ForwardAccepter<A>
+where
+    A: Accepter<Output = (SocketAddr, T)> + Unpin + Send,
+    T: Stream + Unpin + 'static,
+{
+    pub fn new(accepter: A) -> Self {
+        Self { accepter }
+    }
+}
+
+impl<A, T> Accepter for ForwardAccepter<A>
+where
+    A: Accepter<Output = (SocketAddr, T)> + Unpin + Send,
+    T: Stream + Unpin + Send + 'static,
+{
+    type Output = Whence;
+
+    fn poll_accept(
+        mut self: Pin<&mut Self>,
+        ctx: &mut std::task::Context<'_>,
+    ) -> Poll<error::Result<Self::Output>> {
+        match Pin::new(&mut self.accepter).poll_accept(ctx)? {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready((addr, stream)) => Poll::Ready(Ok(Whence::Mapping(Connection::new(
+                addr,
+                BoxedStream::new(stream),
+            )))),
         }
     }
 }

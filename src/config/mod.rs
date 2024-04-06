@@ -14,12 +14,12 @@ pub enum Authentication {
     Account(AuthWithAccount),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthWithSecret {
     secret: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthWithAccount {
     username: String,
     password: String,
@@ -96,4 +96,9 @@ impl<C> Clone for Stateful<C>{
     fn clone(&self) -> Self {
         Stateful { conf: self.conf.clone() }
     }
+}
+
+
+pub(crate) fn default_auth_timeout() -> u32{
+    60
 }

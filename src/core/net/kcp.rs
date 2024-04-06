@@ -8,7 +8,7 @@ use std::{
 use crate::{
     core::{
         accepter::Accepter,
-        future::StoredFuture,
+        future::LazyFuture,
         io::{AsyncRead, AsyncWrite},
     },
     error,
@@ -24,7 +24,7 @@ pub trait KcpProvider: UdpProvider {
 pub struct KcpListener {
     #[pin]
     pub(crate) inner: Arc<kcp_rust::KcpListener<UdpSocket<'static>>>,
-    pub(crate) stored: StoredFuture<
+    pub(crate) stored: LazyFuture<
         'static,
         std::io::Result<(SocketAddr, kcp_rust::KcpStream<kcp_rust::ServerImpl>)>,
     >,
@@ -48,7 +48,7 @@ impl KcpListener {
 
         Ok(KcpListener {
             inner: Arc::new(listener),
-            stored: StoredFuture::new(),
+            stored: LazyFuture::new(),
         })
     }
 }

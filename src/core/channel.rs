@@ -45,6 +45,10 @@ impl<T> Sender<T> {
             data: Some(data),
         }
     }
+
+    pub fn send_sync(&self, data: T) {
+        self.container.push(data);
+    }
 }
 
 impl<T> Clone for Sender<T> {

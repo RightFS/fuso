@@ -8,12 +8,14 @@ use std::{
 
 use self::io::{AsyncRead, AsyncWrite};
 
-pub mod connector;
 pub mod accepter;
+pub mod channel;
+pub mod connector;
 pub mod future;
 pub mod handshake;
 pub mod io;
 pub mod net;
+pub mod port_forward;
 pub mod processor;
 pub mod protocol;
 pub mod rpc;
@@ -21,6 +23,7 @@ pub mod split;
 pub mod stream;
 pub mod task;
 pub mod token;
+pub mod transfer;
 
 pub type BoxedFuture<'a, O> = Pin<Box<dyn Future<Output = O> + Send + 'a>>;
 
@@ -90,9 +93,20 @@ impl<'a> From<(SocketAddr, BoxedStream<'a>)> for Connection<'a> {
     }
 }
 
-impl Connection<'_> {
+impl<'a> Connection<'a> {
+    pub fn new<S>(addr: SocketAddr, stream: S) -> Self
+    where
+        S: Into<BoxedStream<'a>>,
+    {
+        Self {
+            addr,
+            stream: stream.into(),
+            cursor: None,
+            marked: None,
+        }
+    }
 
-    pub fn addr(&self) -> &SocketAddr{
+    pub fn addr(&self) -> &SocketAddr {
         &self.addr
     }
 

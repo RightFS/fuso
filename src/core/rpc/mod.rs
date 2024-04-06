@@ -1,17 +1,44 @@
-pub mod caller;
-pub mod channel;
+mod callee;
+mod caller;
+
 pub mod structs;
 
-use std::{pin::Pin, task::Poll};
+use std::{
+    marker::PhantomData,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use crate::error;
 
-use super::BoxedFuture;
+pub use callee::*;
+pub use caller::*;
+
+#[pin_project::pin_project]
+pub struct Call<'caller, C, A, O> {
+    arg: A,
+    #[pin]
+    caller: &'caller mut C,
+    _marked: PhantomData<O>,
+}
 
 pub trait AsyncCall<T> {
     type Output;
 
-    fn call<'a>(&'a mut self, data: T) -> BoxedFuture<'a, Self::Output>;
+    fn poll_call(self: Pin<&mut Self>, cx: &mut Context<'_>, arg: &T) -> Poll<Self::Output>;
+}
+
+pub trait ICallExt<A, O>: AsyncCall<A, Output = O> {
+    fn call<'caller>(&'caller mut self, arg: A) -> Call<'caller, Self, A, O>
+    where
+        Self: Sized + Unpin,
+    {
+        Call {
+            caller: self,
+            arg,
+            _marked: PhantomData,
+        }
+    }
 }
 
 pub trait Encoder<T> {
@@ -23,12 +50,14 @@ pub trait Decoder<T> {
     fn decode(self) -> error::Result<Self::Output>;
 }
 
+impl<T, A, O> ICallExt<A, O> for T where T: AsyncCall<A, Output = O> {}
+
 impl<T> Encoder<T> for T
 where
     T: serde::Serialize,
 {
     fn encode(self) -> error::Result<Vec<u8>> {
-        Ok(bincode::serialize(&self).unwrap())
+        bincode::serialize(&self).map_err(Into::into)
     }
 }
 
@@ -39,6 +68,21 @@ where
     type Output = T;
 
     fn decode(self) -> error::Result<Self::Output> {
-        unimplemented!()
+        bincode::deserialize(&self).map_err(Into::into)
+    }
+}
+
+impl<'caller, C, A, O> std::future::Future for Call<'caller, C, A, O>
+where
+    C: AsyncCall<A, Output = O> + Unpin,
+{
+    type Output = O;
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let mut this = self.project();
+        Pin::new(&mut **this.caller).poll_call(cx, &this.arg)
     }
 }

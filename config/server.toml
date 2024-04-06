@@ -5,7 +5,7 @@ features = ["kcp", "proxy", "multiprocess"]
  
 [auth]
 type = "secret"
-secret = "fasedfhkasjdfh"
+secret = "12345678"
 
 [manager]
 bind = "127.0.0.1"

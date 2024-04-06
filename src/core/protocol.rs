@@ -51,6 +51,7 @@ pub trait AsyncPacketSend: AsyncWrite {
             },
         }
     }
+    
 }
 
 impl<T> AsyncPacketRead for T where T: AsyncRead {}

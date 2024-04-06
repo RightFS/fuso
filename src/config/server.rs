@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{Authentication, Compress, Crypto};
+use super::{default_auth_timeout, Authentication, Compress, Crypto};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -22,6 +22,9 @@ pub struct Config {
     pub features: HashSet<Feature>,
     #[serde(rename = "auth")]
     pub authentication: Authentication,
+    #[serde(rename = "auth_timeout")]
+    #[serde(default = "default_auth_timeout")]
+    pub authentication_timeout: u32
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +71,7 @@ pub struct KcpListenMetadata {
 
 impl ListenMetadata {
     pub fn as_socket_addr(self) -> SocketAddr {
+        log::debug!("{}:{}", self.bind, self.port);
         SocketAddr::new(self.bind, self.port)
     }
 }
@@ -94,9 +98,11 @@ impl Default for Config {
             authentication: Authentication::None,
             crypto: Default::default(),
             compress: Default::default(),
+            authentication_timeout: default_auth_timeout(),
         }
     }
 }
+
 
 #[cfg(test)]
 #[cfg(feature = "fuso-toml")]

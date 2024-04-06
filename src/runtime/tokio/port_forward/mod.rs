@@ -2,13 +2,11 @@ use std::net::SocketAddr;
 
 use crate::{
     core::{
-        accepter::Accepter,
-        processor::Preprocessor,
-        rpc::structs::port_forward::VisitorProtocol,
+        accepter::Accepter, processor::Preprocessor, rpc::structs::port_forward::VisitorProtocol,
         BoxedStream, Connection, Stream,
     },
     error,
-    server::port_forward::{PortForwarder, MuxAccepter, Whence},
+    server::port_forward::{MuxAccepter, Whence},
 };
 
 use super::TokioRuntime;
@@ -18,11 +16,11 @@ where
     A: Accepter<Output = (SocketAddr, BoxedStream<'static>)> + Unpin + Send,
 {
     pub fn new(magic: u32, secret: [u8; 16], accepter: A) -> Self {
-        MuxAccepter::<TokioRuntime, A>::new_runtime(accepter, magic, secret)
+        Self::new_runtime(accepter, magic, secret)
     }
 }
 
-impl<A, T> PortForwarder<TokioRuntime, A, T>
+impl<A, T> crate::server::port_forward::PortForwarder<TokioRuntime, A, T>
 where
     A: Accepter<Output = Whence> + Unpin + 'static,
     T: Stream + Send + Unpin + 'static,
@@ -34,6 +32,15 @@ where
         M: Preprocessor<Connection<'static>, Output = error::Result<Connection<'static>>>,
         M: Send + Sync + 'static,
     {
-        PortForwarder::<TokioRuntime, A, T>::new_with_runtime(stream, accepter, prepvis, prepmap)
+        Self::new_with_runtime(stream, accepter, prepvis, prepmap)
+    }
+}
+
+impl crate::client::port_forward::PortForwarder<TokioRuntime> {
+    pub fn new<S, C>(transport: S, connector: C) -> Self
+    where
+        S: Stream + Unpin + Send + 'static,
+    {
+        Self::new_with_runtime(transport, connector)
     }
 }

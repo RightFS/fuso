@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use fuso::{
     cli,
@@ -12,9 +12,11 @@ use fuso::{
     },
     core::{
         accepter::AccepterExt,
-        io::StreamExt,
+        connector::MultiConnector,
+        io::{AsyncReadExt, StreamExt},
         net::{TcpListener, TcpStream},
-        rpc::{caller::Caller, AsyncCall},
+        protocol::{AsyncPacketRead, AsyncPacketSend},
+        rpc::{AsyncCall, Caller},
         stream::{handshake::Handshake, UseCompress, UseCrypto},
     },
     error,
@@ -95,23 +97,44 @@ async fn enter_forward_service_main(
             }
         })
         .await?
-        .use_crypto(crypto.clone())
-        .use_compress(compress.clone())
-        .client_handshake(&server.authentication)
+        .use_crypto(crypto.iter())
+        .use_compress(compress.iter())
+        .client_handshake::<TokioRuntime>(
+            &server.authentication,
+            Duration::from_secs(server.authentication_timeout as _),
+        )
         .await;
 
-    log::debug!("...");
-
-    let transport = match result {
+    let mut stream = match result {
         Ok(stream) => stream,
         Err(e) => {
             log::error!("fail to handshake {e:?}");
-            return Ok(Rise::Fatal);
+            return Ok(Rise::Restart);
         }
     };
 
-    Ok(Rise::Fatal)
+    stream.write_config(&service).await?;
+
+    let mut connector = MultiConnector::<usize, usize>::new();
+
+    if let Some(channel) = service.channel.as_ref() {
+        // connector.add();
+    }
+
+    let mut forwarder = PortForwarder::new(stream, connector);
+
+    loop {
+        let (linker, target) = forwarder.accept().await?;
+
+        tokio::spawn(async move {
+            let a = linker.link().await;
+        });
+    }
+
+    
 }
+
+
 
 async fn enter_proxy_service_main(
     config: Stateful<Config>,
@@ -123,19 +146,20 @@ async fn enter_proxy_service_main(
 
     let result = server
         .try_connect(|host, port| async move {
-            log::debug!("connect to server {host}:{port}");
+            // log::debug!("connect to server {host}:{port}");
             match host {
                 Host::Ip(ip) => TcpStream::connect(SocketAddr::new(*ip, port)).await,
                 Host::Domain(domain) => TcpStream::connect(format!("{domain}:{port}")).await,
             }
         })
         .await?
-        .use_crypto(crypto.clone())
-        .use_compress(compress.clone())
-        .client_handshake(&server.authentication)
+        .use_crypto(crypto.iter())
+        .use_compress(compress.iter())
+        .client_handshake::<TokioRuntime>(
+            &server.authentication,
+            Duration::from_secs(server.authentication_timeout as _),
+        )
         .await;
-
-    log::debug!("...");
 
     let transport = match result {
         Ok(stream) => stream,
@@ -145,7 +169,7 @@ async fn enter_proxy_service_main(
         }
     };
 
-    Ok(Rise::Fatal)
+    Ok(Rise::Restart)
 }
 
 async fn enter_bridge_service_main(

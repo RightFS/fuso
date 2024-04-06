@@ -1,20 +1,43 @@
-use env_logger::Target;
+mod linker;
 
-use crate::core::{accepter::Accepter, Stream};
+use std::marker::PhantomData;
+use self::linker::Linker;
 
-pub struct PortForwarder {}
+use crate::{
+    config::client::FinalTarget,
+    core::{
+        accepter::Accepter,
+        port_forward::Transport,
+        rpc::{structs::port_forward::Request, AsyncCall},
+        Connection, Stream,
+    },
+    runtime::Runtime,
+};
 
-impl PortForwarder {
-    pub fn new<S, C>(transport: S, connector: C) -> Self
+
+
+pub struct PortForwarder<R> {
+    _marked: PhantomData<R>,
+}
+
+impl<R> PortForwarder<R>
+where
+    R: Runtime + 'static,
+{
+    pub fn new_with_runtime<S, C>(transport: S, connector: C) -> Self
     where
-        S: Stream + Unpin,
+        S: Stream + Unpin + Send + 'static,
     {
-      unimplemented!()
+        let (transport, hold) = Transport::new::<R>(std::time::Duration::from_secs(1), transport);
+
+        unimplemented!()
     }
 }
 
-impl Accepter for PortForwarder {
-    type Output = Target;
+
+
+impl<R> Accepter for PortForwarder<R> {
+    type Output = (Linker, FinalTarget);
 
     fn poll_accept(
         self: std::pin::Pin<&mut Self>,

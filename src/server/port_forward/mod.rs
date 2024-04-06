@@ -1,12 +1,10 @@
 mod accepter;
 mod handshake;
 mod preprocessor;
-mod transport;
 
 pub use accepter::*;
 pub use handshake::*;
 pub use preprocessor::*;
-pub use transport::*;
 
 use parking_lot::Mutex;
 use std::future::Future;
@@ -16,7 +14,9 @@ use std::{collections::HashMap, pin::Pin, sync::Arc, task::Poll};
 
 use crate::core::future::Poller;
 use crate::core::io::AsyncReadExt;
+use crate::core::port_forward::Transport;
 use crate::core::rpc::structs::port_forward;
+use crate::core::rpc::ICallExt;
 use crate::core::token::IncToken;
 use crate::core::Stream;
 use crate::runtime::Runtime;
@@ -25,17 +25,14 @@ use crate::{
         accepter::Accepter,
         io::{AsyncRead, AsyncWrite},
         processor::{Preprocessor, WrappedPreprocessor},
-        rpc::{
-            structs::port_forward::{Request, VisitorProtocol},
-            AsyncCall,
-        },
+        rpc::structs::port_forward::{Request, VisitorProtocol},
     },
     error,
 };
 
 type Connection = crate::core::Connection<'static>;
 
-pub enum Outcome {
+enum Outcome {
     Ready(u64, Connection),
     Pending(u64),
     Timeout(u64),
@@ -57,7 +54,7 @@ pub struct PortForwarder<Runtime, A, T> {
     poller: Poller<'static, error::Result<Outcome>>,
     accepter: A,
     visitors: Visitors,
-    transport: Transport<'static, T>,
+    transport: Transport<T>,
     prepmap: WrappedPreprocessor<'static, Connection, error::Result<Connection>>,
     prepvis: WrappedPreprocessor<'static, Connection, error::Result<VisitorProtocol>>,
     _marked: PhantomData<Runtime>,
@@ -160,6 +157,7 @@ impl<R, A, T> PortForwarder<R, A, T>
 where
     A: Accepter<Output = Whence> + Unpin + 'static,
     T: Stream + Unpin + Send + 'static,
+    R: Runtime + 'static,
 {
     pub fn new_with_runtime<P, M>(stream: T, accepter: A, prepvis: P, prepmap: M) -> Self
     where
@@ -170,9 +168,14 @@ where
     {
         let mut poller = Poller::new();
 
-        let (transport, hold) = Transport::new(stream);
+        let (transport, hold) = Transport::new::<R>(std::time::Duration::from_secs(10), stream);
 
-        poller.add(hold);
+        poller.add(async move {
+            match hold.await {
+                Ok(()) => Ok(Outcome::Stopped(None)),
+                Err(e) => Ok(Outcome::Stopped(Some(e))),
+            }
+        });
 
         Self {
             poller,
@@ -200,7 +203,7 @@ where
     async fn do_prepare_visitor(
         conn: Connection,
         visitors: Visitors,
-        transport: Transport<'_, T>,
+        transport: Transport<T>,
         preprocessor: WrappedPreprocessor<'_, Connection, error::Result<VisitorProtocol>>,
     ) -> error::Result<Outcome> {
         let mut transport = transport;
@@ -230,7 +233,7 @@ where
 
     async fn do_prepare_mapping(
         conn: Connection,
-        _: Transport<'_, T>,
+        _: Transport<T>,
         preprocessor: WrappedPreprocessor<'_, Connection, error::Result<Connection>>,
     ) -> error::Result<Outcome> {
         let mut conn = preprocessor.prepare(conn).await?;

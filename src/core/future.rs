@@ -21,16 +21,16 @@ macro_rules! select {
     };
 }
 
-pub struct StoredFuture<'a, O>(Option<Pin<Box<dyn Future<Output = O> + 'a>>>);
+pub struct LazyFuture<'a, O>(Option<Pin<Box<dyn Future<Output = O> + 'a>>>);
 
 pub struct Select<'a, O>(pub Vec<BoxedFuture<'a, O>>);
 
 pub struct Poller<'a, O>(pub Vec<BoxedFuture<'a, O>>);
 
-unsafe impl<'a, O> Send for StoredFuture<'a, O> {}
-unsafe impl<'a, O> Sync for StoredFuture<'a, O> {}
+unsafe impl<'a, O> Send for LazyFuture<'a, O> {}
+unsafe impl<'a, O> Sync for LazyFuture<'a, O> {}
 
-impl<'a, O> StoredFuture<'a, O> {
+impl<'a, O> LazyFuture<'a, O> {
     pub fn poll<F, Fut>(&mut self, cx: &mut Context<'_>, f: F) -> Poll<O>
     where
         F: Fn() -> Fut,
@@ -51,7 +51,7 @@ impl<'a, O> StoredFuture<'a, O> {
     }
 }
 
-impl<'a, O> StoredFuture<'a, O> {
+impl<'a, O> LazyFuture<'a, O> {
     pub fn new() -> Self {
         Self(Default::default())
     }
@@ -67,6 +67,10 @@ impl<'a, O> Poller<'a, O> {
         F: Future<Output = O> + Send + 'a,
     {
         self.0.push(Box::pin(fut))
+    }
+
+    pub fn has_more(&self) -> bool{
+        self.0.len() > 0
     }
 }
 

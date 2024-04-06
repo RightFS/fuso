@@ -124,13 +124,29 @@ where
     ) -> std::task::Poll<Self::Output> {
         loop {
             match Pin::new(&mut self.poller).poll(cx) {
-                Poll::Pending => return Poll::Pending,
+                Poll::Pending => {
+                    return if self.poller.has_more() {
+                        Poll::Pending
+                    } else {
+                        log::debug!("ready ..");
+                        Poll::Ready(Ok(()))
+                    }
+                }
                 Poll::Ready((mut runnable, result)) => {
-                    log::debug!("{} stooped", runnable.name());
                     match runnable.restartable() {
                         true => match result {
-                            Ok(Rise::Fatal | Rise::Exit) => {}
-                            _ => {
+                            Ok(Rise::Fatal | Rise::Exit) => {
+                                log::debug!("{} stooped", runnable.name());
+                            }
+                            result => {
+                                if let Err(e) = result {
+                                    log::warn!(
+                                        "failed to start `{}` {}, restart it",
+                                        runnable.name(),
+                                        e
+                                    )
+                                }
+
                                 let fut = runnable.call();
                                 log::debug!("restart {}", runnable.name());
                                 self.poller.add(Runnable::Pause(runnable, {
@@ -142,7 +158,7 @@ where
                             }
                         },
                         false => {
-                            log::debug!("finished task")
+                            log::debug!("{} stooped", runnable.name())
                         }
                     };
                 }

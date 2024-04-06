@@ -19,11 +19,9 @@ pub struct CompressedStream<'a> {
     compressor: BoxedCodec<'a>,
 }
 
-pub fn compress_stream<'a, S>(
-    stream: S,
-    compress: Vec<Compress>,
-) -> CompressedStream<'a>
+pub fn compress_stream<'a, 'compress, C, S>(stream: S, mut compress: C) -> CompressedStream<'a>
 where
+    C: Iterator<Item = &'compress Compress>,
     S: AsyncRead + AsyncWrite + Send + Unpin + 'a,
 {
     fn use_compress<'a>(compress: &Compress) -> BoxedCodec<'a> {
@@ -32,27 +30,25 @@ where
         }
     }
 
-    let compressor = if compress.is_empty() {
-        BoxedCodec(Box::new(EmptyCodec))
-    } else if compress.len() == 1 {
-        use_compress(&compress[0])
-    } else {
-        let mut compressor = BoxedCodec(Box::new({
-            PairCodec {
-                first: use_compress(&compress[0]),
-                second: use_compress(&compress[1]),
-            }
-        }));
-
-        for crypto_type in &compress[2..] {
-            compressor = BoxedCodec(Box::new(PairCodec {
-                first: compressor,
-                second: use_compress(crypto_type),
-            }))
-        }
-
-        compressor
+    let mut compressor = match compress.next() {
+        None => BoxedCodec(Box::new(EmptyCodec)),
+        Some(comp) => match compress.next() {
+            None => use_compress(comp),
+            Some(next) => BoxedCodec(Box::new({
+                PairCodec {
+                    first: use_compress(comp),
+                    second: use_compress(next),
+                }
+            })),
+        },
     };
+
+    for crypto_type in compress {
+        compressor = BoxedCodec(Box::new(PairCodec {
+            first: compressor,
+            second: use_compress(crypto_type),
+        }))
+    }
 
     CompressedStream {
         stream: BoxedStream::new(stream),
@@ -70,7 +66,6 @@ impl<'a> AsyncRead for CompressedStream<'a> {
         Pin::new(&mut *this.compressor).poll_decode(cx, &mut *this.stream, buf)
     }
 }
-
 
 impl<'a> AsyncWrite for CompressedStream<'a> {
     fn poll_flush(

@@ -9,7 +9,7 @@ use crate::error;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Authentication, BootKind, Compress, Crypto, KeepAlive, RestartPolicy};
+use super::{default_auth_timeout, Authentication, BootKind, Compress, Crypto, KeepAlive, RestartPolicy};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -41,6 +41,9 @@ pub struct Server {
     pub compress: Vec<Compress>,
     #[serde(rename = "auth")]
     pub authentication: Authentication,
+    #[serde(rename = "auth_timeout")]
+    #[serde(default = "default_auth_timeout")]
+    pub authentication_timeout: u32
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -221,6 +224,7 @@ impl Default for Config {
                 crypto: Default::default(),
                 compress: Default::default(),
                 authentication: Authentication::None,
+                authentication_timeout: default_auth_timeout()
             },
             features: Default::default(),
             services: Default::default(),

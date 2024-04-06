@@ -1,7 +1,12 @@
-use std::{net::SocketAddr, str::FromStr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+    time::Duration,
+};
 
+use bincode::de;
 use fuso::{
-    config::{server::Config, Stateful},
+    config::{client::WithForwardService, server::Config, Stateful},
     core::{
         accepter::{AccepterExt, MultiAccepter, StreamAccepter, TaggedAccepter},
         future::Select,
@@ -11,13 +16,16 @@ use fuso::{
         processor::{IProcessor, Processor, StreamProcessor},
         protocol::{AsyncPacketRead, AsyncPacketSend},
         split::SplitStream,
-        stream::{fallback::Fallback, handshake::Handshake},
+        stream::{
+            fallback::Fallback,
+            handshake::{ClientConfig, ForwardConfig, Handshake},
+            UseCompress, UseCrypto,
+        },
+        BoxedStream, Stream,
     },
     error,
-    server::{
-        manager::{Manager, MultiServiceManager},
-        port_forward::{MuxAccepter, PortForwarder},
-    },
+    runtime::tokio::TokioRuntime,
+    server::port_forward::{ForwardAccepter, MuxAccepter, PortForwarder},
 };
 
 #[derive(Debug, Clone)]
@@ -150,31 +158,78 @@ async fn enter_fuso_serve(conf: Stateful<Config>) -> error::Result<()> {
     }
 
     loop {
-        let (addr, (_, transport)) = accepter.accept().await?;
+        let (_, (addr, transport)) = accepter.accept().await?;
 
+        log::debug!("connection from {addr}");
+        let conf = conf.clone();
 
-        let mut forwarder = PortForwarder::new(
-            transport,
-            {
-                MuxAccepter::new(1110, rand::random(), {
-                    StreamAccepter::new({
-                        fuso::core::net::TcpListener::bind(
-                            SocketAddr::from_str("0.0.0.0:9999").unwrap(),
-                        )
-                        .await?
-                    })
-                })
-            },
-            (),
-            None,
-        );
+        tokio::spawn(async move {
+            if let Err(e) = handle_connection(conf, transport).await {
+                log::error!("{:?}", e);
+            }
+        });
+    }
+}
 
-        let mgr = 0;
+pub async fn handle_connection(
+    conf: Stateful<Config>,
+    stream: BoxedStream<'static>,
+) -> error::Result<()> {
+    let crypto = &conf.crypto;
+    let compress = &conf.compress;
 
+    let mut stream = stream
+        .use_crypto(crypto.iter())
+        .use_compress(compress.iter())
+        .server_handshake::<TokioRuntime>(
+            &conf.authentication,
+            Duration::from_secs(conf.authentication_timeout as _),
+        )
+        .await?;
+
+    match stream.read_config().await? {
+        ClientConfig::Forward(forward) => enter_forwarder(forward, stream).await?,
+    }
+
+    Ok(())
+}
+
+pub async fn enter_forwarder<S>(conf: ForwardConfig, transport: S) -> error::Result<()>
+where
+    S: Stream + Send + Unpin + 'static,
+{
+    log::debug!("{:#?}", conf);
+
+    let mut accepter = MultiAccepter::new();
+
+    if let Some(port) = conf.channel {
+        accepter.add(ForwardAccepter::new(
+            TcpListener::bind(format!("0:{port}")).await?,
+        ));
+    }
+
+    let mut multi_mux_accepter = MultiAccepter::new();
+
+    for port in conf.exposes.iter() {
+        multi_mux_accepter.add(StreamAccepter::new(
+            TcpListener::bind(format!("0:{port}")).await?,
+        ));
+    }
+
+    let mux_accepter = MuxAccepter::new(1110, rand::random(), {
+        StreamAccepter::new(multi_mux_accepter)
+    });
+
+    accepter.add(mux_accepter);
+
+    let mut forwarder = PortForwarder::new(transport, accepter, (), None);
+
+    log::debug!("forward started ..");
+
+    loop {
         let (c1, c2) = forwarder.accept().await?;
     }
 
-    let s = fuso::server::Serve {};
 
     Ok(())
 }
