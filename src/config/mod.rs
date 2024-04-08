@@ -147,7 +147,7 @@ impl From<Expose> for String {
     fn from(expose: Expose) -> Self {
         match expose {
             Expose::Kcp(ip, port) => format!("{port}/kcp/{ip}"),
-            Expose::Tcp(ip, tcp) => format!("{tcp}/tcp/{ip}"),
+            Expose::Tcp(ip, port) => format!("{port}/tcp/{ip}"),
         }
     }
 }

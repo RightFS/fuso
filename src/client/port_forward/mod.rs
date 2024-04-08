@@ -4,6 +4,7 @@ mod transport;
 use self::linker::Linker;
 use crate::core::rpc::{structs::port_forward::Request, AsyncCallee};
 use std::{marker::PhantomData, pin::Pin, task::Poll};
+use crate::core::connector::ConnectExt;
 
 use crate::{
     client::port_forward::transport::Transport,
@@ -24,13 +25,18 @@ where
 {
     pub fn new_with_runtime<C>(transport: S, connector: C) -> Self
     where
-        C: Connector<(), Output = Connection<'static>>,
+        C: Connector<(), Output = Connection<'static>> + Unpin,
     {
+        let mut connector = connector;
+        
+
         // let (transport, hold) = Transport::new::<R>(std::time::Duration::from_secs(1), transport);
 
         unimplemented!()
     }
 }
+
+
 
 impl<R, S> Accepter for PortForwarder<R, S>
 where

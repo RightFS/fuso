@@ -30,7 +30,7 @@ use crate::{
     error,
 };
 
-use self::transport::Transport;
+use transport::Transport;
 
 type Connection = crate::core::Connection<'static>;
 

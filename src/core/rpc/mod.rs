@@ -1,10 +1,11 @@
 mod callee;
 mod caller;
+mod keep;
+mod lopper;
 
 pub mod structs;
 
 use std::{
-    future::Future,
     marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
@@ -14,8 +15,14 @@ use crate::error;
 
 pub use callee::*;
 pub use caller::*;
+use serde::{Deserialize, Serialize};
 
-use super::future::Select;
+#[derive(Debug, Serialize, Deserialize)]
+enum Cmd {
+    Ping,
+    Pong,
+    Transact { token: u64, packet: Vec<u8> },
+}
 
 #[pin_project::pin_project]
 pub struct Call<'caller, C, A, O> {
@@ -61,8 +68,6 @@ pub trait Decoder<T> {
 
 impl<T, A, O> ICallExt<A, O> for T where T: AsyncCall<A, Output = O> {}
 
-pub struct Looper<'looper>(Select<'looper, error::Result<()>>);
-
 impl<T> Encoder<T> for T
 where
     T: serde::Serialize,
@@ -95,18 +100,5 @@ where
     ) -> std::task::Poll<Self::Output> {
         let mut this = self.project();
         Pin::new(&mut **this.caller).poll_call(cx, &this.arg)
-    }
-}
-
-impl<'looper> Looper<'looper> {
-    fn new() -> Self {
-        Self(Select::new())
-    }
-
-    fn post<F>(&mut self, f: F)
-    where
-        F: Future<Output = error::Result<()>> + Send + 'looper,
-    {
-        self.0.add(f);
     }
 }

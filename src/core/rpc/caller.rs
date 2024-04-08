@@ -17,21 +17,9 @@ use crate::{
     runtime::Runtime,
 };
 
-use super::{AsyncCall, Decoder, Looper};
+use super::{lopper::Looper, AsyncCall, Cmd, Decoder};
 use crate::core::rpc::Encoder;
 use crate::core::split::SplitStream;
-
-#[derive(Debug, Serialize, Deserialize)]
-enum Request {
-    Ping,
-    Data { token: u64, data: Vec<u8> },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-enum Response {
-    Pong,
-    Data { token: u64, data: Vec<u8> },
-}
 
 #[derive(Default, Clone)]
 pub struct Calls {
@@ -42,7 +30,7 @@ pub struct Calls {
 #[pin_project::pin_project]
 pub struct Caller<S> {
     calls: Calls,
-    request: Sender<Request>,
+    request: Sender<Cmd>,
     #[pin]
     fut_call: Arc<Mutex<LazyFuture<'static, error::Result<Vec<u8>>>>>,
     marked: PhantomData<S>,
@@ -57,7 +45,7 @@ where
         R: Runtime + 'a,
     {
         let (reader, writer) = stream.split();
-        let (req_rx, req_ax) = channel::open::<Request>();
+        let (req_rx, req_ax) = channel::open::<Cmd>();
         let (heart_rx, heart_ax) = channel::open::<Response>();
 
         let calls = Calls::default();
@@ -86,7 +74,6 @@ where
     }
 }
 
-
 impl<'caller, S, T> AsyncCall<T> for Caller<S>
 where
     T: serde::Serialize + Send + 'static,
@@ -109,8 +96,8 @@ where
             let token = this.calls.add(setter);
 
             let result = match data {
-                Ok(data) => {
-                    this.request.send_sync(Request::Data { token, data });
+                Ok(packet) => {
+                    this.request.send_sync(Cmd::Transact { token, packet });
                     Ok(())
                 }
                 Err(error) => {
@@ -154,43 +141,13 @@ impl<'a> Looper<'a> {
         }
     }
 
-    async fn run_recv_loop<S>(
-        calls: Calls,
-        writer: WriteHalf<S>,
-        receiver: Receiver<Request>,
-    ) -> error::Result<()>
-    where
-        S: Stream + Unpin,
-    {
-        let mut writer = writer;
-        loop {
-            let pkt = receiver.recv().await?.encode()?;
-            if let Err(_) = writer.send_packet(&pkt).await {
-                calls.cancel_all();
-            };
-        }
-    }
+    
 
-    async fn run_send_loop<S>(
-        calls: Calls,
-        reader: ReadHalf<S>,
-        sender: Sender<Response>,
-    ) -> error::Result<()>
-    where
-        S: Stream + Unpin,
-    {
-        let mut reader = reader;
-        loop {
-            let data = reader.recv_packet().await?;
-            let response: Response = data.decode()?;
-
-            match response {
-                Response::Pong => sender.send(Response::Pong).await,
-                response => calls.wake(response),
-            }?;
-        }
-    }
+    
 }
+
+
+
 
 impl<'a> std::future::Future for Looper<'a> {
     type Output = error::Result<()>;
@@ -213,7 +170,7 @@ impl Calls {
         token
     }
 
-    fn wake(&self, resp: Response) -> error::Result<()> {
+    fn wake(&self, token: u64, packet: Vec<u8>) -> error::Result<()> {
         match resp {
             Response::Pong => unsafe { std::hint::unreachable_unchecked() },
             Response::Data { token, data } => match self.call_list.lock().remove(&token) {

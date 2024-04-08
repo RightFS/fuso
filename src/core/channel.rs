@@ -84,9 +84,7 @@ pub fn open<T>() -> (Sender<T>, Receiver<T>) {
         Sender {
             container: container.clone(),
         },
-        Receiver {
-            container: container,
-        },
+        Receiver { container },
     )
 }
 

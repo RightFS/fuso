@@ -111,7 +111,7 @@ async fn enter_forward_service_main(
             log::error!("fail to handshake {e:?}");
             return Ok(Rise::Restart);
         }
-    };
+    };                                                                                                                                                                                                                                                                                              
 
     stream.write_config(&service).await?;
 
