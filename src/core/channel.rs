@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     sync::Arc,
-    task::{Poll, Waker},
+    task::{Context, Poll, Waker},
 };
 
 use parking_lot::Mutex;
@@ -34,6 +34,13 @@ impl<T> Receiver<T> {
     pub fn recv<'a>(&'a self) -> Recv<'a, T> {
         Recv {
             receiver: &self.container,
+        }
+    }
+
+    pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<error::Result<T>> {
+        match self.container.take(cx.waker()) {
+            None => Poll::Pending,
+            Some(t) => Poll::Ready(Ok(t)),
         }
     }
 }

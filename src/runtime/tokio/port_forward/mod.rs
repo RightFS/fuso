@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 
 use crate::{
     core::{
-        accepter::Accepter, processor::Preprocessor, rpc::structs::port_forward::VisitorProtocol,
-        BoxedStream, Connection, Stream,
+        accepter::Accepter, connector::Connector, processor::Preprocessor,
+        rpc::structs::port_forward::VisitorProtocol, BoxedStream, Connection, Stream,
     },
     error,
     server::port_forward::{MuxAccepter, Whence},
@@ -40,8 +40,10 @@ impl<S> crate::client::port_forward::PortForwarder<TokioRuntime, S>
 where
     S: Stream + Send + Unpin + 'static,
 {
-    pub fn new<C>(transport: S, connector: C) -> Self {
-        // Self::new_with_runtime(transport, connector)
-        unimplemented!()
+    pub fn new<C>(transport: S, connector: C) -> Self
+    where
+        C: Connector<(), Output = Connection<'static>> + Send + Unpin + 'static,
+    {
+        Self::new_with_runtime(transport, connector)
     }
 }

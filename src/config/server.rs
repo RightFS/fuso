@@ -71,7 +71,6 @@ pub struct KcpListenMetadata {
 
 impl ListenMetadata {
     pub fn as_socket_addr(self) -> SocketAddr {
-        log::debug!("{}:{}", self.bind, self.port);
         SocketAddr::new(self.bind, self.port)
     }
 }

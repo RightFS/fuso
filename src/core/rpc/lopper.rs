@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{future::Future, pin::Pin};
 
 use crate::{
     core::{
@@ -42,6 +42,16 @@ impl<'looper> Looper<'looper> {
         F: Future<Output = error::Result<()>> + Send + 'looper,
     {
         self.0.add(f);
+    }
+}
+
+impl<'a> std::future::Future for Looper<'a> {
+    type Output = error::Result<()>;
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(cx)
     }
 }
 

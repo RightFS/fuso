@@ -8,9 +8,12 @@ pub enum FusoError {
     Timeout,
     Abort,
     AuthError,
+    InvaledSetter,
     BadRpcCall(u64),
     InvalidPort,
     InvalidExposeType,
+    NotResponse,
+    Custom(String),
     Bincode(bincode::Error),
     TomlDeError(toml::de::Error),
     StdIo(std::io::Error),
@@ -28,9 +31,15 @@ impl From<toml::de::Error> for FusoError {
     }
 }
 
-impl From<bincode::Error> for FusoError{
+impl From<bincode::Error> for FusoError {
     fn from(value: bincode::Error) -> Self {
         Self::Bincode(value)
+    }
+}
+
+impl From<String> for FusoError {
+    fn from(value: String) -> Self {
+        Self::Custom(value)
     }
 }
 

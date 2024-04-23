@@ -13,7 +13,7 @@ auth = { type = "secret", secret = "12345678" }
 type = "forward"
 boot = "fork"
 exposes = [ "8080/tcp" ]
-channel = [ "8002/tcp", "8002/kcp" ]
+channel = [ "8002/tcp" ]
 restart = "always"
 target = { type = "static", port = 2222, addr = ["127.0.0.1"] }
 keep_alive = { interval = 100 }

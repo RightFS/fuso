@@ -22,9 +22,9 @@ impl IncToken {
             let cur_tok = *inc_token;
 
             let (cur_tok, overflow) = if f(cur_tok) {
-                cur_tok.overflowing_add(1)
-            } else {
                 break cur_tok;
+            } else {
+                cur_tok.overflowing_add(1)
             };
 
             if overflow {

@@ -17,7 +17,7 @@ use fuso::{
         net::{TcpListener, TcpStream},
         protocol::{AsyncPacketRead, AsyncPacketSend},
         rpc::{AsyncCall, Caller},
-        stream::{handshake::Handshake, UseCompress, UseCrypto},
+        stream::{handshake::Handshake, UseCompress, UseCrypto}, Connection,
     },
     error,
     runner::{FnRunnable, NamedRunnable, Rise, ServiceRunner},
@@ -115,7 +115,7 @@ async fn enter_forward_service_main(
 
     stream.write_config(&service).await?;
 
-    let mut connector = MultiConnector::<usize, usize>::new();
+    let mut connector = MultiConnector::<(), Connection<'static>>::new();
 
     if let Some(channel) = service.channel.as_ref() {
         // connector.add(connector)
@@ -126,11 +126,7 @@ async fn enter_forward_service_main(
     loop {
         let (linker, target) = forwarder.accept().await?;
 
-        tokio::spawn(async move {
-
-            
-            let a = linker.link().await;
-        });
+        log::debug!("connect to {}", linker);
     }
 }
 

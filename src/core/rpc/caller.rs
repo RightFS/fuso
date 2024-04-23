@@ -1,14 +1,11 @@
 use std::{collections::HashMap, marker::PhantomData, pin::Pin, sync::Arc};
 
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{
-        channel::{self, Receiver, Sender},
+        channel::{Receiver, Sender},
         future::LazyFuture,
-        protocol::{AsyncPacketRead, AsyncPacketSend},
-        split::{ReadHalf, WriteHalf},
         task::{setter, Setter},
         token::IncToken,
         Stream,
@@ -17,7 +14,7 @@ use crate::{
     runtime::Runtime,
 };
 
-use super::{lopper::Looper, AsyncCall, Cmd, Decoder};
+use super::{lopper::Looper, AsyncCall, Cmd};
 use crate::core::rpc::Encoder;
 use crate::core::split::SplitStream;
 
@@ -32,7 +29,7 @@ pub struct Caller<S> {
     calls: Calls,
     request: Sender<Cmd>,
     #[pin]
-    fut_call: Arc<Mutex<LazyFuture<'static, error::Result<Vec<u8>>>>>,
+    caller: Arc<Mutex<LazyFuture<'static, error::Result<Vec<u8>>>>>,
     marked: PhantomData<S>,
 }
 
@@ -44,30 +41,18 @@ where
     where
         R: Runtime + 'a,
     {
-        let (reader, writer) = stream.split();
-        let (req_rx, req_ax) = channel::open::<Cmd>();
-        let (heart_rx, heart_ax) = channel::open::<Response>();
-
         let calls = Calls::default();
 
-        let mut looper = Looper::new();
+        let (mut looper, sender, receiver) = Looper::new(stream);
 
-        looper.post(Looper::run_heartbeat::<R>(
-            heartbeat_delay,
-            req_rx.clone(),
-            heart_ax,
-        ));
-
-        looper.post(Looper::run_send_loop(calls.clone(), reader, heart_rx));
-
-        looper.post(Looper::run_recv_loop(calls.clone(), writer, req_ax));
+        looper.post(Looper::run_command_consumer::<R>(receiver, calls.clone()));
 
         (
             looper,
             Self {
                 calls,
-                request: req_rx,
-                fut_call: Arc::new(Mutex::new(LazyFuture::new())),
+                request: sender,
+                caller: Arc::new(Mutex::new(LazyFuture::new())),
                 marked: PhantomData,
             },
         )
@@ -88,9 +73,9 @@ where
     ) -> std::task::Poll<Self::Output> {
         let this = self.project();
 
-        let mut fut_call = this.fut_call.lock();
+        let mut caller = this.caller.lock();
 
-        Pin::new(&mut fut_call).poll(cx, move || {
+        Pin::new(&mut caller).poll(cx, move || {
             let data = arg.encode();
             let (setter, getter) = setter();
             let token = this.calls.add(setter);
@@ -117,45 +102,17 @@ where
 }
 
 impl<'a> Looper<'a> {
-    async fn run_heartbeat<R>(
-        delay: std::time::Duration,
-        sender: Sender<Request>,
-        receiver: Receiver<Response>,
+    async fn run_command_consumer<R>(
+        receiver: Receiver<(u64, Vec<u8>)>,
+        calls: Calls,
     ) -> error::Result<()>
     where
         R: Runtime,
     {
-        let mut last = std::time::Instant::now();
-
         loop {
-            sender.send(Request::Ping).await?;
-
-            match R::wait_for(delay, receiver.recv()).await?? {
-                Response::Pong => {
-                    last = std::time::Instant::now();
-                }
-                _ => unsafe { std::hint::unreachable_unchecked() },
-            }
-
-            R::sleep(delay).await;
+            let (token, packet) = receiver.recv().await?;
+            calls.wake(token, packet)?;
         }
-    }
-
-    
-
-    
-}
-
-
-
-
-impl<'a> std::future::Future for Looper<'a> {
-    type Output = error::Result<()>;
-    fn poll(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        Pin::new(&mut self.0).poll(cx)
     }
 }
 
@@ -171,12 +128,9 @@ impl Calls {
     }
 
     fn wake(&self, token: u64, packet: Vec<u8>) -> error::Result<()> {
-        match resp {
-            Response::Pong => unsafe { std::hint::unreachable_unchecked() },
-            Response::Data { token, data } => match self.call_list.lock().remove(&token) {
-                None => Err(error::FusoError::BadRpcCall(token)),
-                Some(setter) => setter.set(data),
-            },
+        match self.call_list.lock().remove(&token) {
+            None => Err(error::FusoError::BadRpcCall(token)),
+            Some(setter) => setter.set(packet),
         }
     }
 
@@ -195,7 +149,7 @@ impl<T> Clone for Caller<T> {
             calls: self.calls.clone(),
             request: self.request.clone(),
             marked: PhantomData,
-            fut_call: self.fut_call.clone(),
+            caller: self.caller.clone(),
         }
     }
 }

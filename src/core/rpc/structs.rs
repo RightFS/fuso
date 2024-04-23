@@ -5,8 +5,8 @@ pub mod port_forward {
 
     #[derive(Debug, Serialize, Deserialize)]
     pub enum Target {
-        Udp(ServerAddr),
-        Tcp(ServerAddr),
+        Udp(ServerAddr, u16),
+        Tcp(ServerAddr, u16),
     }
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -17,16 +17,11 @@ pub mod port_forward {
     #[derive(Debug, Serialize, Deserialize)]
     pub enum Response {
         Ok,
-        Error(),
-    }
-
-    pub enum WithSocks {
-        Tcp(ServerAddr),
-        Udp(ServerAddr),
+        Error(String),
     }
 
     pub enum VisitorProtocol {
-        Socks(Connection<'static>, WithSocks),
-        Other(Connection<'static>, Option<ServerAddr>),
+        Socks(Connection<'static>, Target),
+        Other(Connection<'static>, Option<Target>),
     }
 }

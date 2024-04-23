@@ -38,6 +38,7 @@ enum Outcome {
     Ready(u64, Connection),
     Pending(u64),
     Timeout(u64),
+    Transport(u64, error::FusoError),
     Stopped(Option<error::FusoError>),
 }
 
@@ -112,7 +113,10 @@ where
             let (need_poll, outcome) = match Pin::new(&mut self.poller).poll(ctx) {
                 Poll::Pending => continue,
                 Poll::Ready(Ok(o)) => (false, o),
-                Poll::Ready(Err(_)) => continue,
+                Poll::Ready(Err(e)) => {
+                    log::error!("{:?}", e);
+                    continue;
+                }
             };
 
             polled = need_poll;
@@ -145,6 +149,16 @@ where
                             Some(e) => Poll::Ready(Err(e)),
                             None => Poll::Ready(Err(error::FusoError::Abort)),
                         }
+                    }
+                }
+                Outcome::Transport(token, transport) => {
+                    if let Some(conn) = self.visitors.take(token) {
+                        log::warn!(
+                            "failed to create mapping {{ token={}, addr={}, msg='{}' }}",
+                            token,
+                            conn.addr(),
+                            transport
+                        );
                     }
                 }
             };
@@ -211,13 +225,10 @@ where
         let mut transport = transport;
 
         let (conn, addr) = match preprocessor.prepare(conn).await? {
-            VisitorProtocol::Socks(conn, socks) => match socks {
-                port_forward::WithSocks::Tcp(addr) => (conn, Some(Target::Tcp(addr))),
-                port_forward::WithSocks::Udp(addr) => (conn, Some(Target::Udp(addr))),
-            },
+            VisitorProtocol::Socks(conn, socks) => (conn, Some(socks)),
             VisitorProtocol::Other(conn, addr) => match addr {
                 None => (conn, None),
-                Some(addr) => (conn, Some(Target::Tcp(addr))),
+                Some(target) => (conn, Some(target)),
             },
         };
 
@@ -225,15 +236,24 @@ where
 
         let token = visitors.store(conn);
 
-        match transport.call(Request::New(token, addr)).await {
-            Err(_) => {}
-            Ok(resp) => match resp {
-                port_forward::Response::Ok => {}
-                port_forward::Response::Error() => todo!(),
+        let result = R::wait_for(std::time::Duration::from_secs(10), async move {
+            match transport.call(Request::New(token, addr)).await {
+                Err(e) => Err(e),
+                Ok(resp) => match resp {
+                    port_forward::Response::Ok => Ok(()),
+                    port_forward::Response::Error(msg) => Err(msg.into()),
+                },
+            }
+        })
+        .await;
+
+        match result {
+            Err(_) => Ok(Outcome::Transport(token, error::FusoError::NotResponse)),
+            Ok(r) => match r {
+                Ok(_) => Ok(Outcome::Pending(token)),
+                Err(e) => Ok(Outcome::Transport(token, e)),
             },
         }
-
-        Ok(Outcome::Pending(token))
     }
 
     async fn do_prepare_mapping(

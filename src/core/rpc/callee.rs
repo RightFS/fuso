@@ -1,71 +1,64 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, task::Poll};
 
 use crate::{
     core::{
         channel::{self, Receiver, Sender},
         protocol::AsyncPacketRead,
-        rpc::{lopper::Looper, Looper},
+        rpc::lopper::Looper,
         split::{ReadHalf, WriteHalf},
         Stream,
     },
     error,
 };
 
-use super::{structs::port_forward::Request, AsyncCallee, Decoder};
+use super::{structs::port_forward::Request, AsyncCallee, Cmd, Decoder};
 use crate::core::split::SplitStream;
 
-pub struct Callee<O> {
-    _marked: PhantomData<O>,
+pub struct Callee<'looper> {
+    requester: Receiver<(u64, Vec<u8>)>,
+    responder: Sender<Cmd>,
+    _marked: PhantomData<&'looper ()>,
 }
 
-impl<S> Callee<S>
-where
-    S: Stream + Send + Unpin,
-{
-    pub fn new(stream: S, heartbeat_delay: std::time::Duration) -> Self {
+pub struct Responder {
+    token: u64,
+    responder: Sender<Cmd>,
+}
+
+impl<'looper> Callee<'looper> {
+    pub fn new<S>(stream: S, heartbeat_delay: std::time::Duration) -> (Looper<'looper>, Self)
+    where
+        S: Stream + Send + Unpin + 'looper,
+    {
         let (looper, rx, ax) = Looper::new(stream);
 
-        unimplemented!()
+        (
+            looper,
+            Self {
+                requester: ax,
+                responder: rx,
+                _marked: PhantomData,
+            },
+        )
     }
 }
 
-
-
-impl<O> AsyncCallee for Callee<O> {
-    type Output = O;
+impl AsyncCallee for Callee<'_> {
+    type Output = error::Result<(Vec<u8>, Responder)>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        unimplemented!()
-    }
-}
-
-impl Looper<'_> {
-    async fn run_callee_receiver<S>(
-        reader: ReadHalf<S>,
-        sender: Sender<Request>,
-    ) -> error::Result<()>
-    where
-        S: Stream + Unpin,
-    {
-        let mut reader = reader;
-        loop {
-            let pkt = reader.recv_packet().await?;
-            sender.send(pkt.decode()?).await?;
-        }
-    }
-
-    async fn run_callee_sender<S>(
-        writer: WriteHalf<S>,
-        receiver: Receiver<Request>,
-    ) -> error::Result<()>
-    where
-        S: Stream + Unpin,
-    {
-        loop {
-            let data = receiver.recv().await?;
+    ) -> Poll<Self::Output> {
+        match self.requester.poll_recv(cx)? {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready((token, packet)) => Poll::Ready(Ok((
+                packet,
+                Responder {
+                    token,
+                    responder: self.responder.clone(),
+                },
+            ))),
         }
     }
 }

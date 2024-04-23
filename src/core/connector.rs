@@ -44,6 +44,15 @@ pub struct MultiConnector<'a, T, O> {
     connectors: Vec<BoxedConnector<'a, T, O>>,
 }
 
+impl<'connector, T, O> BoxedConnector<'connector, T, O> {
+    pub fn new<C>(connector: C) -> Self
+    where
+        C: Connector<T, Output = O> + Send + Unpin + 'connector,
+    {
+        Self(Box::new(connector))
+    }
+}
+
 impl<'a, T, O> MultiConnector<'a, T, O> {
     pub fn new() -> Self {
         Self {
