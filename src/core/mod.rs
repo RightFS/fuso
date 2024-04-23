@@ -36,14 +36,14 @@ pub trait Stream: io::AsyncRead + io::AsyncWrite {}
 
 pub struct Connection<'a> {
     addr: SocketAddr,
-    stream: BoxedStream<'a>,
+    stream: AbstractStream<'a>,
     cursor: Option<Cursor<Vec<u8>>>,
     marked: Option<Cursor<Vec<u8>>>,
 }
 
-pub struct BoxedStream<'a>(Box<dyn Stream + Unpin + Send + 'a>);
+pub struct AbstractStream<'a>(Box<dyn Stream + Unpin + Send + 'a>);
 
-impl<'a> BoxedStream<'a> {
+impl<'a> AbstractStream<'a> {
     pub fn new<S>(stream: S) -> Self
     where
         S: Stream + Unpin + Send + 'a,
@@ -54,7 +54,7 @@ impl<'a> BoxedStream<'a> {
 
 impl<T> Stream for T where T: io::AsyncRead + io::AsyncWrite + Unpin {}
 
-impl<'a> io::AsyncRead for BoxedStream<'a> {
+impl<'a> io::AsyncRead for AbstractStream<'a> {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -64,7 +64,7 @@ impl<'a> io::AsyncRead for BoxedStream<'a> {
     }
 }
 
-impl<'a> io::AsyncWrite for BoxedStream<'a> {
+impl<'a> io::AsyncWrite for AbstractStream<'a> {
     fn poll_write(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -81,8 +81,8 @@ impl<'a> io::AsyncWrite for BoxedStream<'a> {
     }
 }
 
-impl<'a> From<(SocketAddr, BoxedStream<'a>)> for Connection<'a> {
-    fn from(value: (SocketAddr, BoxedStream<'a>)) -> Self {
+impl<'a> From<(SocketAddr, AbstractStream<'a>)> for Connection<'a> {
+    fn from(value: (SocketAddr, AbstractStream<'a>)) -> Self {
         Self {
             addr: value.0,
             stream: value.1,
@@ -95,7 +95,7 @@ impl<'a> From<(SocketAddr, BoxedStream<'a>)> for Connection<'a> {
 impl<'a> Connection<'a> {
     pub fn new<S>(addr: SocketAddr, stream: S) -> Self
     where
-        S: Into<BoxedStream<'a>>,
+        S: Into<AbstractStream<'a>>,
     {
         Self {
             addr,

@@ -36,15 +36,15 @@ pub trait ConnectExt<T, O>: Connector<T, Output = O> {
 
 impl<C, T, O> ConnectExt<T, O> for C where C: Connector<T, Output = O> {}
 
-pub struct BoxedConnector<'connector, T, O>(
+pub struct AbstractConnector<'connector, T, O>(
     Box<dyn Connector<T, Output = O> + Send + Unpin + 'connector>,
 );
 
 pub struct MultiConnector<'a, T, O> {
-    connectors: Vec<BoxedConnector<'a, T, O>>,
+    connectors: Vec<AbstractConnector<'a, T, O>>,
 }
 
-impl<'connector, T, O> BoxedConnector<'connector, T, O> {
+impl<'connector, T, O> AbstractConnector<'connector, T, O> {
     pub fn new<C>(connector: C) -> Self
     where
         C: Connector<T, Output = O> + Send + Unpin + 'connector,
@@ -64,7 +64,7 @@ impl<'a, T, O> MultiConnector<'a, T, O> {
     where
         C: Connector<T, Output = O> + Send + Unpin + 'a,
     {
-        self.connectors.push(BoxedConnector(Box::new(connector)));
+        self.connectors.push(AbstractConnector(Box::new(connector)));
     }
 }
 
@@ -80,7 +80,7 @@ where
     }
 }
 
-impl<T, O> Connector<T> for BoxedConnector<'_, T, O> {
+impl<T, O> Connector<T> for AbstractConnector<'_, T, O> {
     type Output = O;
     fn poll_connect(
         mut self: Pin<&mut Self>,

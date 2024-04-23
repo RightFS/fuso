@@ -5,7 +5,7 @@ use tokio::io::ReadBuf;
 use crate::{
     core::{
         future::LazyFuture,
-        net::{BoxedDatagram, KcpListener},
+        net::{AbstractDatagram, KcpListener},
         BoxedFuture,
     },
     error,
@@ -39,14 +39,14 @@ impl crate::core::net::UdpProvider for KcpWithTokioRuntime {
     type Connect = Self;
 }
 
-impl crate::core::Provider<BoxedFuture<'static, error::Result<BoxedDatagram<'static>>>>
+impl crate::core::Provider<BoxedFuture<'static, error::Result<AbstractDatagram<'static>>>>
     for KcpWithTokioRuntime
 {
     type Arg = SocketAddr;
 
-    fn call(addr: Self::Arg) -> BoxedFuture<'static, error::Result<BoxedDatagram<'static>>> {
+    fn call(addr: Self::Arg) -> BoxedFuture<'static, error::Result<AbstractDatagram<'static>>> {
         Box::pin(async move {
-            let boxed: BoxedDatagram<'_> = Box::new(TokioUdpSocket(Arc::new({
+            let boxed: AbstractDatagram<'_> = Box::new(TokioUdpSocket(Arc::new({
                 tokio::net::UdpSocket::bind(addr).await?
             })));
             Ok(boxed)

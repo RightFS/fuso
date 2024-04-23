@@ -3,32 +3,32 @@ use std::{net::SocketAddr, pin::Pin, task::Poll};
 use crate::error;
 
 use crate::core::{
-    accepter::{Accepter, BoxedAccepter},
+    accepter::{Accepter, AbstractAccepter},
     io::{AsyncRead, AsyncWrite},
-    BoxedFuture, BoxedStream, Provider,
+    BoxedFuture, AbstractStream, Provider,
 };
 
 pub trait TcpProvider {
     type Connector: Provider<
-        BoxedFuture<'static, error::Result<BoxedStream<'static>>>,
+        BoxedFuture<'static, error::Result<AbstractStream<'static>>>,
         Arg = SocketAddr,
     >;
 
     type Listener: Provider<
         BoxedFuture<
             'static,
-            error::Result<BoxedAccepter<'static, (SocketAddr, BoxedStream<'static>)>>,
+            error::Result<AbstractAccepter<'static, (SocketAddr, AbstractStream<'static>)>>,
         >,
         Arg = SocketAddr,
     >;
 }
 
 pub struct TcpListener {
-    pub(crate) accepter: BoxedAccepter<'static, (SocketAddr, BoxedStream<'static>)>,
+    pub(crate) accepter: AbstractAccepter<'static, (SocketAddr, AbstractStream<'static>)>,
 }
 
 pub struct TcpStream {
-    pub(crate) stream: BoxedStream<'static>,
+    pub(crate) stream: AbstractStream<'static>,
 }
 
 impl TcpStream {

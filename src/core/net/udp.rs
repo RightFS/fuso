@@ -2,15 +2,15 @@ use std::{net::SocketAddr, pin::Pin};
 
 use crate::{core::{BoxedFuture, Provider}, error};
 
-pub type BoxedDatagram<'a> = Box<dyn Datagram + Send + Sync + Unpin + 'a>;
+pub type AbstractDatagram<'a> = Box<dyn Datagram + Send + Sync + Unpin + 'a>;
 
 pub trait UdpProvider {
-    type Binder: Provider<BoxedFuture<'static, error::Result<BoxedDatagram<'static>>>, Arg = SocketAddr>;
-    type Connect: Provider<BoxedFuture<'static, error::Result<BoxedDatagram<'static>>>, Arg = SocketAddr>;
+    type Binder: Provider<BoxedFuture<'static, error::Result<AbstractDatagram<'static>>>, Arg = SocketAddr>;
+    type Connect: Provider<BoxedFuture<'static, error::Result<AbstractDatagram<'static>>>, Arg = SocketAddr>;
 }
 
 pub struct UdpSocket<'a> {
-    inner: BoxedDatagram<'a>,
+    inner: AbstractDatagram<'a>,
 }
 
 pub trait AsyncRecvfrom {

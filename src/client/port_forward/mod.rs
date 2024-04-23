@@ -5,7 +5,7 @@ use self::linker::Linker;
 
 use crate::{
     core::{
-        connector::BoxedConnector,
+        connector::AbstractConnector,
         rpc::{structs::port_forward::Request, AsyncCallee},
     },
     error,
@@ -21,7 +21,7 @@ use crate::{
 
 pub struct PortForwarder<R, S> {
     transport: Transport<'static, S>,
-    connector: BoxedConnector<'static, (), Connection<'static>>,
+    connector: AbstractConnector<'static, (), Connection<'static>>,
     _marked: PhantomData<R>,
 }
 
@@ -38,7 +38,7 @@ where
 
         Self {
             transport,
-            connector: BoxedConnector::new(connector),
+            connector: AbstractConnector::new(connector),
             _marked: PhantomData,
         }
     }

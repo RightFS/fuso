@@ -11,7 +11,7 @@ use super::{Connection, Rc4MagicHandshake, Whence};
 use crate::core::future::Poller;
 use crate::core::io::AsyncReadExt;
 use crate::core::Stream;
-use crate::core::{accepter::Accepter, BoxedStream};
+use crate::core::{accepter::Accepter, AbstractStream};
 use crate::error;
 use crate::runtime::Runtime;
 
@@ -34,7 +34,7 @@ pub struct ForwardAccepter<A> {
 
 impl<R, A> Accepter for MuxAccepter<R, A>
 where
-    A: Accepter<Output = (SocketAddr, BoxedStream<'static>)> + Unpin + 'static,
+    A: Accepter<Output = (SocketAddr, AbstractStream<'static>)> + Unpin + 'static,
     R: Runtime + Unpin + 'static,
 {
     type Output = Whence;
@@ -108,7 +108,7 @@ where
 #[cfg(feature = "fuso-runtime")]
 impl<R, A> MuxAccepter<R, A>
 where
-    A: Accepter<Output = (SocketAddr, BoxedStream<'static>)> + Unpin + Send,
+    A: Accepter<Output = (SocketAddr, AbstractStream<'static>)> + Unpin + Send,
 {
     pub fn new_runtime(accepter: A, magic: u32, secret: [u8; 16]) -> Self {
         Self {
@@ -159,10 +159,10 @@ where
             Poll::Ready((addr, stream)) => Poll::Ready(Ok({
                 match self.whence {
                     AcceptWhence::Visitor => {
-                        Whence::Visitor(Connection::new(addr, BoxedStream::new(stream)))
+                        Whence::Visitor(Connection::new(addr, AbstractStream::new(stream)))
                     }
                     AcceptWhence::Mapping => {
-                        Whence::Mapping(Connection::new(addr, BoxedStream::new(stream)))
+                        Whence::Mapping(Connection::new(addr, AbstractStream::new(stream)))
                     }
                 }
             })),

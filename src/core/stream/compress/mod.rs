@@ -7,16 +7,16 @@ use crate::{config::Compress, error};
 
 use crate::core::{
     io::{AsyncRead, AsyncWrite},
-    BoxedStream,
+    AbstractStream,
 };
 
-use super::codec::{AsyncDecoder, AsyncEncoder, BoxedCodec};
+use super::codec::{AsyncDecoder, AsyncEncoder, AbstractCodec};
 
 #[pin_project::pin_project]
 pub struct CompressedStream<'a> {
     #[pin]
-    stream: BoxedStream<'a>,
-    compressor: BoxedCodec<'a>,
+    stream: AbstractStream<'a>,
+    compressor: AbstractCodec<'a>,
 }
 
 pub fn compress_stream<'a, 'compress, C, S>(stream: S, mut compress: C) -> CompressedStream<'a>
@@ -24,17 +24,17 @@ where
     C: Iterator<Item = &'compress Compress>,
     S: AsyncRead + AsyncWrite + Send + Unpin + 'a,
 {
-    fn use_compress<'a>(compress: &Compress) -> BoxedCodec<'a> {
+    fn use_compress<'a>(compress: &Compress) -> AbstractCodec<'a> {
         match compress {
-            Compress::Lz4 => BoxedCodec(Box::new(lz4::Lz4Compressor {})),
+            Compress::Lz4 => AbstractCodec(Box::new(lz4::Lz4Compressor {})),
         }
     }
 
     let mut compressor = match compress.next() {
-        None => BoxedCodec(Box::new(EmptyCodec)),
+        None => AbstractCodec(Box::new(EmptyCodec)),
         Some(comp) => match compress.next() {
             None => use_compress(comp),
-            Some(next) => BoxedCodec(Box::new({
+            Some(next) => AbstractCodec(Box::new({
                 PairCodec {
                     first: use_compress(comp),
                     second: use_compress(next),
@@ -44,14 +44,14 @@ where
     };
 
     for crypto_type in compress {
-        compressor = BoxedCodec(Box::new(PairCodec {
+        compressor = AbstractCodec(Box::new(PairCodec {
             first: compressor,
             second: use_compress(crypto_type),
         }))
     }
 
     CompressedStream {
-        stream: BoxedStream::new(stream),
+        stream: AbstractStream::new(stream),
         compressor,
     }
 }

@@ -10,15 +10,15 @@ use crate::core::{
     io::{AsyncRead, AsyncWrite},
     stream::codec::{EmptyCodec, PairCodec},
 };
-use crate::{config::Crypto, core::BoxedStream, error};
+use crate::{config::Crypto, core::AbstractStream, error};
 
-use super::codec::{AsyncDecoder, AsyncEncoder, BoxedCodec};
+use super::codec::{AsyncDecoder, AsyncEncoder, AbstractCodec};
 
 pub trait AsyncEncrypt {
     fn poll_encrypt(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &[u8],
     ) -> Poll<error::Result<usize>>;
 }
@@ -27,7 +27,7 @@ pub trait AsyncDecrypt {
     fn poll_decrypt(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &mut [u8],
     ) -> Poll<error::Result<usize>>;
 }
@@ -37,8 +37,8 @@ pub trait AsyncCrypto: AsyncEncrypt + AsyncDecrypt {}
 #[pin_project::pin_project]
 pub struct EncryptedStream<'a> {
     #[pin]
-    stream: BoxedStream<'a>,
-    crypto: BoxedCodec<'a>,
+    stream: AbstractStream<'a>,
+    crypto: AbstractCodec<'a>,
 }
 
 pub fn encrypt_stream<'a, 'crypto, C, S>(stream: S, mut cryptos: C) -> EncryptedStream<'a>
@@ -46,18 +46,18 @@ where
     C: Iterator<Item = &'crypto Crypto>,
     S: AsyncRead + AsyncWrite + Send + Unpin + 'a,
 {
-    fn use_crypto<'a>(crypto: &Crypto) -> BoxedCodec<'a> {
+    fn use_crypto<'a>(crypto: &Crypto) -> AbstractCodec<'a> {
         match crypto {
-            Crypto::Rsa => BoxedCodec(Box::new(rsa::RsaCrypto {})),
-            Crypto::Aes => BoxedCodec(Box::new(aes::AesCrypto {})),
+            Crypto::Rsa => AbstractCodec(Box::new(rsa::RsaCrypto {})),
+            Crypto::Aes => AbstractCodec(Box::new(aes::AesCrypto {})),
         }
     }
 
     let mut crypto = match cryptos.next() {
-        None => BoxedCodec(Box::new(EmptyCodec)),
+        None => AbstractCodec(Box::new(EmptyCodec)),
         Some(crypto) => match cryptos.next() {
             None => use_crypto(&crypto),
-            Some(next) => BoxedCodec(Box::new({
+            Some(next) => AbstractCodec(Box::new({
                 PairCodec {
                     first: use_crypto(&crypto),
                     second: use_crypto(&next),
@@ -67,7 +67,7 @@ where
     };
 
     for crypto_type in cryptos {
-        crypto = BoxedCodec(Box::new(PairCodec {
+        crypto = AbstractCodec(Box::new(PairCodec {
             first: crypto,
             second: use_crypto(&crypto_type),
         }))
@@ -75,7 +75,7 @@ where
 
     EncryptedStream {
         crypto,
-        stream: BoxedStream::new(stream),
+        stream: AbstractStream::new(stream),
     }
 }
 
@@ -88,7 +88,7 @@ where
     fn poll_decode(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &mut [u8],
     ) -> Poll<error::Result<usize>> {
         Pin::new(&mut *self).poll_decrypt(cx, stream, buf)
@@ -102,7 +102,7 @@ where
     fn poll_encode(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &[u8],
     ) -> Poll<error::Result<usize>> {
         Pin::new(&mut *self).poll_encrypt(cx, stream, buf)

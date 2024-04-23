@@ -21,7 +21,7 @@ use fuso::{
             handshake::{ClientConfig, ForwardConfig, Handshake},
             UseCompress, UseCrypto,
         },
-        BoxedStream, Stream,
+        AbstractStream, Stream,
     },
     error,
     runtime::tokio::TokioRuntime,
@@ -174,7 +174,7 @@ async fn enter_fuso_serve(conf: Stateful<Config>) -> error::Result<()> {
 
 pub async fn handle_connection(
     conf: Stateful<Config>,
-    stream: BoxedStream<'static>,
+    stream: AbstractStream<'static>,
 ) -> error::Result<()> {
     let crypto = &conf.crypto;
     let compress = &conf.compress;

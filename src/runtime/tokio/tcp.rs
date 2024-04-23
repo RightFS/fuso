@@ -4,10 +4,10 @@ use tokio::io::ReadBuf;
 
 use crate::{
     core::{
-        accepter::{Accepter, BoxedAccepter},
+        accepter::{Accepter, AbstractAccepter},
         io,
         net::{TcpListener, TcpProvider, TcpStream},
-        BoxedFuture, BoxedStream, Provider,
+        BoxedFuture, AbstractStream, Provider,
     },
     error,
 };
@@ -50,7 +50,7 @@ impl TcpStream {
     {
         let stream = tokio::net::TcpStream::connect(addr).await?;
         Ok(TcpStream {
-            stream: BoxedStream::new(stream),
+            stream: AbstractStream::new(stream),
         })
     }
 }
@@ -63,7 +63,7 @@ impl TcpListener {
     {
         let listener = tokio::net::TcpListener::bind(addr).await?;
         Ok(TcpListener {
-            accepter: BoxedAccepter::new(listener),
+            accepter: AbstractAccepter::new(listener),
         })
     }
 }
@@ -76,12 +76,12 @@ impl TcpProvider for TokioTcpProver {
     type Connector = Self;
 }
 
-impl Provider<BoxedFuture<'static, error::Result<BoxedStream<'static>>>> for TokioTcpProver {
+impl Provider<BoxedFuture<'static, error::Result<AbstractStream<'static>>>> for TokioTcpProver {
     type Arg = SocketAddr;
 
-    fn call(addr: Self::Arg) -> BoxedFuture<'static, error::Result<BoxedStream<'static>>> {
+    fn call(addr: Self::Arg) -> BoxedFuture<'static, error::Result<AbstractStream<'static>>> {
         Box::pin(async move {
-            Ok(BoxedStream::new(
+            Ok(AbstractStream::new(
                 tokio::net::TcpStream::connect(addr).await?,
             ))
         })
@@ -92,7 +92,7 @@ impl
     Provider<
         BoxedFuture<
             'static,
-            error::Result<BoxedAccepter<'static, (SocketAddr, BoxedStream<'static>)>>,
+            error::Result<AbstractAccepter<'static, (SocketAddr, AbstractStream<'static>)>>,
         >,
     > for TokioTcpProver
 {
@@ -102,10 +102,10 @@ impl
         addr: Self::Arg,
     ) -> BoxedFuture<
         'static,
-        error::Result<BoxedAccepter<'static, (SocketAddr, BoxedStream<'static>)>>,
+        error::Result<AbstractAccepter<'static, (SocketAddr, AbstractStream<'static>)>>,
     > {
         Box::pin(async move {
-            Ok(BoxedAccepter::new(
+            Ok(AbstractAccepter::new(
                 tokio::net::TcpListener::bind(addr).await?,
             ))
         })
@@ -113,7 +113,7 @@ impl
 }
 
 impl Accepter for tokio::net::TcpListener {
-    type Output = (std::net::SocketAddr, BoxedStream<'static>);
+    type Output = (std::net::SocketAddr, AbstractStream<'static>);
     fn poll_accept(
         self: std::pin::Pin<&mut Self>,
         ctx: &mut std::task::Context<'_>,
@@ -121,7 +121,7 @@ impl Accepter for tokio::net::TcpListener {
         match tokio::net::TcpListener::poll_accept(&*self, ctx)? {
             std::task::Poll::Pending => Poll::Pending,
             std::task::Poll::Ready((stream, addr)) => {
-                Poll::Ready(Ok((addr, BoxedStream::new(stream))))
+                Poll::Ready(Ok((addr, AbstractStream::new(stream))))
             }
         }
     }

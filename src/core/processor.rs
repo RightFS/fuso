@@ -33,17 +33,17 @@ pub trait StreamProcessor {
 
 impl<'a, T> StreamProcessor for T where T: AsyncRead + AsyncWrite {}
 
-pub struct BoxedProcessor<'a, A, R>(Box<dyn IProcessor<A, R> + Send + Unpin + 'a>);
+pub struct AbstractProcessor<'a, A, R>(Box<dyn IProcessor<A, R> + Send + Unpin + 'a>);
 
 pub struct Processor<'a, A, R> {
-    processors: Vec<BoxedProcessor<'a, A, R>>,
+    processors: Vec<AbstractProcessor<'a, A, R>>,
 }
 
 pub struct WrappedPreprocessor<'a, In, Out>(
     pub(crate) Arc<dyn Preprocessor<In, Output = Out> + Sync + Send + 'a>,
 );
 
-impl<A, R> IProcessor<A, R> for BoxedProcessor<'_, A, R>
+impl<A, R> IProcessor<A, R> for AbstractProcessor<'_, A, R>
 where
     A: Send,
 {
@@ -83,7 +83,7 @@ impl<'a, A, R> Processor<'a, A, R> {
     where
         P: IProcessor<A, R> + Unpin + Send + 'a,
     {
-        self.processors.push(BoxedProcessor(Box::new(p)))
+        self.processors.push(AbstractProcessor(Box::new(p)))
     }
 }
 

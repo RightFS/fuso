@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use crate::{
     core::{
         accepter::Accepter, connector::Connector, processor::Preprocessor,
-        rpc::structs::port_forward::VisitorProtocol, BoxedStream, Connection, Stream,
+        rpc::structs::port_forward::VisitorProtocol, AbstractStream, Connection, Stream,
     },
     error,
     server::port_forward::{MuxAccepter, Whence},
@@ -13,7 +13,7 @@ use super::TokioRuntime;
 
 impl<A> MuxAccepter<TokioRuntime, A>
 where
-    A: Accepter<Output = (SocketAddr, BoxedStream<'static>)> + Unpin + Send,
+    A: Accepter<Output = (SocketAddr, AbstractStream<'static>)> + Unpin + Send,
 {
     pub fn new(magic: u32, secret: [u8; 16], accepter: A) -> Self {
         Self::new_runtime(accepter, magic, secret)

@@ -6,7 +6,7 @@ use std::{
 
 use crate::error;
 
-use super::{BoxedStream, Stream};
+use super::{AbstractStream, Stream};
 
 pub trait Accepter {
     type Output;
@@ -30,20 +30,20 @@ pub struct Accept<'a, A: Unpin> {
     accepter: &'a mut A,
 }
 
-pub struct BoxedAccepter<'a, O>(Box<dyn Accepter<Output = O> + Unpin + Send + 'a>);
+pub struct AbstractAccepter<'a, O>(Box<dyn Accepter<Output = O> + Unpin + Send + 'a>);
 
 pub struct StreamAccepter<'a, O>(Box<dyn Accepter<Output = O> + Unpin + Send + 'a>);
 
 pub struct TaggedAccepter<'a, T: Clone, O> {
     tag: T,
-    accepter: BoxedAccepter<'a, O>,
+    accepter: AbstractAccepter<'a, O>,
 }
 
 pub struct MultiAccepter<'a, O> {
-    accepter_list: Vec<BoxedAccepter<'a, O>>,
+    accepter_list: Vec<AbstractAccepter<'a, O>>,
 }
 
-impl<'a, O> BoxedAccepter<'a, O> {
+impl<'a, O> AbstractAccepter<'a, O> {
     pub fn new<A>(accepter: A) -> Self
     where
         A: Accepter<Output = O> + Unpin + Send + 'a,
@@ -62,7 +62,7 @@ where
     {
         Self {
             tag,
-            accepter: BoxedAccepter::new(accepter),
+            accepter: AbstractAccepter::new(accepter),
         }
     }
 }
@@ -78,7 +78,7 @@ impl<'a, O> MultiAccepter<'a, O> {
     where
         A: Accepter<Output = O> + Unpin + Send + 'static,
     {
-        self.accepter_list.push(BoxedAccepter::new(accepter))
+        self.accepter_list.push(AbstractAccepter::new(accepter))
     }
 }
 
@@ -100,7 +100,7 @@ impl<'a, O> Accepter for MultiAccepter<'a, O> {
     }
 }
 
-impl<'a, O> Accepter for BoxedAccepter<'a, O> {
+impl<'a, O> Accepter for AbstractAccepter<'a, O> {
     type Output = O;
     fn poll_accept(
         mut self: Pin<&mut Self>,
@@ -154,14 +154,14 @@ impl<'a, O> Accepter for StreamAccepter<'a, (SocketAddr, O)>
 where
     O: Stream + Send + Unpin + 'static,
 {
-    type Output = (SocketAddr, BoxedStream<'a>);
+    type Output = (SocketAddr, AbstractStream<'a>);
     fn poll_accept(
         mut self: Pin<&mut Self>,
         ctx: &mut Context<'_>,
     ) -> Poll<error::Result<Self::Output>> {
         match Pin::new(&mut *self.0).poll_accept(ctx)? {
             Poll::Pending => Poll::Pending,
-            Poll::Ready((addr, stream)) => Poll::Ready(Ok((addr, BoxedStream::new(stream)))),
+            Poll::Ready((addr, stream)) => Poll::Ready(Ok((addr, AbstractStream::new(stream)))),
         }
     }
 }

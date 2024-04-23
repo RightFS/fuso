@@ -6,7 +6,7 @@ use std::{
 use crate::{
     core::{
         io::{AsyncRead, AsyncWrite},
-        BoxedStream,
+        AbstractStream,
     },
     error,
 };
@@ -15,7 +15,7 @@ pub trait AsyncEncoder {
     fn poll_encode(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &[u8],
     ) -> Poll<error::Result<usize>>;
 }
@@ -24,20 +24,20 @@ pub trait AsyncDecoder {
     fn poll_decode(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &mut [u8],
     ) -> Poll<error::Result<usize>>;
 }
 
 pub trait Codec: AsyncDecoder + AsyncEncoder {}
 
-pub struct BoxedCodec<'a>(pub(crate) Box<dyn Codec + Send + Unpin + 'a>);
+pub struct AbstractCodec<'a>(pub(crate) Box<dyn Codec + Send + Unpin + 'a>);
 
 #[pin_project::pin_project]
 pub struct PairCodec<'a> {
     #[pin]
-    pub(crate) first: BoxedCodec<'a>,
-    pub(crate) second: BoxedCodec<'a>,
+    pub(crate) first: AbstractCodec<'a>,
+    pub(crate) second: AbstractCodec<'a>,
 }
 
 #[pin_project::pin_project]
@@ -51,24 +51,24 @@ pub struct EmptyCodec;
 
 impl<T> Codec for T where T: AsyncDecoder + AsyncEncoder + Unpin {}
 
-impl<'a> AsyncEncoder for BoxedCodec<'a> {
+impl<'a> AsyncEncoder for AbstractCodec<'a> {
     #[inline]
     fn poll_encode(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &[u8],
     ) -> Poll<error::Result<usize>> {
         Pin::new(&mut *self.0).poll_encode(cx, stream, buf)
     }
 }
 
-impl<'a> AsyncDecoder for BoxedCodec<'a> {
+impl<'a> AsyncDecoder for AbstractCodec<'a> {
     #[inline]
     fn poll_decode(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &mut [u8],
     ) -> Poll<error::Result<usize>> {
         Pin::new(&mut *self.0).poll_decode(cx, stream, buf)
@@ -80,12 +80,12 @@ impl<'a> AsyncEncoder for PairCodec<'a> {
     fn poll_encode(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &[u8],
     ) -> Poll<error::Result<usize>> {
         let mut this = self.project();
 
-        let mut stream = BoxedStream::new(CodecStream {
+        let mut stream = AbstractStream::new(CodecStream {
             stream,
             codec: &mut *this.first,
         });
@@ -99,12 +99,12 @@ impl<'a> AsyncDecoder for PairCodec<'a> {
     fn poll_decode(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &mut [u8],
     ) -> Poll<error::Result<usize>> {
         let mut this = self.project();
 
-        let mut stream = BoxedStream::new(CodecStream {
+        let mut stream = AbstractStream::new(CodecStream {
             stream,
             codec: &mut *this.first,
         });
@@ -113,7 +113,7 @@ impl<'a> AsyncDecoder for PairCodec<'a> {
     }
 }
 
-impl<'s, 'c> AsyncWrite for CodecStream<&mut BoxedStream<'s>, &mut BoxedCodec<'c>> {
+impl<'s, 'c> AsyncWrite for CodecStream<&mut AbstractStream<'s>, &mut AbstractCodec<'c>> {
     #[inline]
     fn poll_write(
         self: Pin<&mut Self>,
@@ -134,7 +134,7 @@ impl<'s, 'c> AsyncWrite for CodecStream<&mut BoxedStream<'s>, &mut BoxedCodec<'c
     }
 }
 
-impl<'s, 'c> AsyncRead for CodecStream<&mut BoxedStream<'s>, &mut BoxedCodec<'c>> {
+impl<'s, 'c> AsyncRead for CodecStream<&mut AbstractStream<'s>, &mut AbstractCodec<'c>> {
     #[inline]
     fn poll_read(
         self: Pin<&mut Self>,
@@ -151,7 +151,7 @@ impl AsyncEncoder for EmptyCodec {
     fn poll_encode(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &[u8],
     ) -> Poll<error::Result<usize>> {
         Pin::new(stream).poll_write(cx, buf)
@@ -163,7 +163,7 @@ impl AsyncDecoder for EmptyCodec {
     fn poll_decode(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        stream: &mut BoxedStream<'_>,
+        stream: &mut AbstractStream<'_>,
         buf: &mut [u8],
     ) -> Poll<error::Result<usize>> {
         Pin::new(stream).poll_read(cx, buf)
