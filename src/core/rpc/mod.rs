@@ -1,7 +1,7 @@
 mod callee;
 mod caller;
 mod keep;
-mod lopper;
+mod polling;
 
 pub mod structs;
 
@@ -15,7 +15,7 @@ use crate::error;
 
 pub use callee::*;
 pub use caller::*;
-pub use lopper::*;
+pub use polling::*;
 
 use serde::{Deserialize, Serialize};
 
@@ -23,40 +23,28 @@ use serde::{Deserialize, Serialize};
 enum Cmd {
     Ping,
     Pong,
+    Cancel(u64),
     Transact { token: u64, packet: Vec<u8> },
 }
 
-#[pin_project::pin_project]
-pub struct Call<'caller, C, A, O> {
-    arg: A,
-    #[pin]
-    caller: &'caller mut C,
-    _marked: PhantomData<O>,
+#[derive(Debug, Serialize, Deserialize)]
+enum Transact {
+    Cancel(u64),
+    Request(u64, Vec<u8>),
 }
 
 pub trait AsyncCall<T> {
-    type Output;
+    type Output<'a>
+    where
+        Self: 'a;
 
-    fn poll_call(self: Pin<&mut Self>, cx: &mut Context<'_>, arg: &T) -> Poll<Self::Output>;
+    fn call<'a>(&'a mut self, arg: T) -> Self::Output<'a>;
 }
 
 pub trait AsyncCallee {
     type Output;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
-}
-
-pub trait ICallExt<A, O>: AsyncCall<A, Output = O> {
-    fn call<'caller>(&'caller mut self, arg: A) -> Call<'caller, Self, A, O>
-    where
-        Self: Sized + Unpin,
-    {
-        Call {
-            caller: self,
-            arg,
-            _marked: PhantomData,
-        }
-    }
 }
 
 pub trait Encoder<T> {
@@ -67,8 +55,6 @@ pub trait Decoder<T> {
     type Output;
     fn decode(self) -> error::Result<Self::Output>;
 }
-
-impl<T, A, O> ICallExt<A, O> for T where T: AsyncCall<A, Output = O> {}
 
 impl<T> Encoder<T> for T
 where
@@ -87,20 +73,5 @@ where
 
     fn decode(self) -> error::Result<Self::Output> {
         bincode::deserialize(&self).map_err(Into::into)
-    }
-}
-
-impl<'caller, C, A, O> std::future::Future for Call<'caller, C, A, O>
-where
-    C: AsyncCall<A, Output = O> + Unpin,
-{
-    type Output = O;
-
-    fn poll(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let mut this = self.project();
-        Pin::new(&mut **this.caller).poll_call(cx, &this.arg)
     }
 }

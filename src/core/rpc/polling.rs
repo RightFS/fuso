@@ -11,13 +11,13 @@ use crate::{
     error,
 };
 
-use super::{keep::Heartbeat, Cmd, Decoder, Encoder};
+use super::{keep::Heartbeat, Cmd, Decoder, Encoder, Transact};
 use crate::core::split::SplitStream;
 
 pub struct Looper<'looper>(Select<'looper, error::Result<()>>);
 
 impl<'looper> Looper<'looper> {
-    pub(super) fn new<S>(stream: S) -> (Self, Sender<Cmd>, Receiver<(u64, Vec<u8>)>)
+    pub(super) fn new<S>(stream: S) -> (Self, Sender<Cmd>, Receiver<Transact>)
     where
         S: Stream + Unpin + Send + 'looper,
     {
@@ -58,7 +58,7 @@ impl<'a> std::future::Future for Looper<'a> {
 impl<'looper> Looper<'looper> {
     pub(super) async fn run_send_loop<S>(
         reader: ReadHalf<S>,
-        sender: Sender<(u64, Vec<u8>)>,
+        sender: Sender<Transact>,
         heartbeat: Heartbeat,
     ) -> error::Result<()>
     where
@@ -72,9 +72,12 @@ impl<'looper> Looper<'looper> {
             match cmd {
                 Cmd::Pong => heartbeat.pong(),
                 Cmd::Ping => heartbeat.ping(),
+                Cmd::Cancel(token) => {
+                    sender.send(Transact::Cancel(token)).await?;
+                }
                 Cmd::Transact { token, packet } => {
                     heartbeat.interrupt();
-                    sender.send((token, packet)).await?;
+                    sender.send(Transact::Request(token, packet)).await?;
                 }
             };
         }
@@ -90,6 +93,7 @@ impl<'looper> Looper<'looper> {
         let mut writer = writer;
         loop {
             let pkt = receiver.recv().await?.encode()?;
+            log::debug!("send to transport {}bytes", pkt.len());
             writer.send_packet(&pkt).await?;
         }
     }

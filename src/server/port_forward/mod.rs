@@ -15,8 +15,8 @@ use std::{collections::HashMap, pin::Pin, sync::Arc, task::Poll};
 
 use crate::core::future::Poller;
 use crate::core::io::AsyncReadExt;
-use crate::core::rpc::structs::port_forward::{self, Target};
-use crate::core::rpc::ICallExt;
+use crate::core::rpc::structs::port_forward::{self};
+use crate::core::rpc::AsyncCall;
 use crate::core::token::IncToken;
 use crate::core::Stream;
 use crate::runtime::Runtime;

@@ -8,6 +8,7 @@ pub enum FusoError {
     Timeout,
     Abort,
     AuthError,
+    Cancel,
     InvaledSetter,
     BadRpcCall(u64),
     InvalidPort,

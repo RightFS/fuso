@@ -4,6 +4,7 @@ use std::task::Poll;
 use crate::core::rpc::{self, Decoder};
 use crate::core::rpc::{Caller, Looper};
 
+use crate::core::BoxedFuture;
 use crate::runtime::Runtime;
 use crate::{
     core::{
@@ -40,17 +41,10 @@ impl<T> AsyncCall<Request> for Transport<T>
 where
     T: Stream + Send + Unpin,
 {
-    type Output = error::Result<Response>;
+    type Output<'a> = BoxedFuture<'a, error::Result<Response>> where T: 'a;
 
-    fn poll_call(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        arg: &Request,
-    ) -> std::task::Poll<Self::Output> {
-        match Pin::new(&mut self.caller).poll_call(cx, arg)? {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(data) => Poll::Ready(Ok(data.decode()?)),
-        }
+    fn call<'a>(&'a mut self, arg: Request) -> Self::Output<'a> {
+        Box::pin(async move { Ok(self.caller.call(arg).await?.decode()?) })
     }
 }
 

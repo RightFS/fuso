@@ -79,7 +79,7 @@ impl<T> Clone for Container<T> {
     fn clone(&self) -> Self {
         Self {
             buffer: self.buffer.clone(),
-            waker: Default::default(),
+            waker: self.waker.clone(),
         }
     }
 }
@@ -103,7 +103,7 @@ where
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let data = self.data.take().expect("invalid state");
         self.sender.push(data);
@@ -137,7 +137,9 @@ impl<T> Container<T> {
         match self.buffer.lock().pop_front() {
             Some(data) => Some(data),
             None => {
-                self.waker.lock().replace(waker.clone());
+                if let Some(waker) = self.waker.lock().replace(waker.clone()) {
+                    waker.wake();
+                }
                 None
             }
         }

@@ -5,7 +5,7 @@ use fuso::{
     client::port_forward::PortForwarder,
     config::{
         client::{
-            Config, Host, ServerAddr, Service, WithBridgeService, WithForwardService,
+            Config, FinalTarget, Host, ServerAddr, Service, WithBridgeService, WithForwardService,
             WithProxyService,
         },
         Stateful,
@@ -17,7 +17,8 @@ use fuso::{
         net::{TcpListener, TcpStream},
         protocol::{AsyncPacketRead, AsyncPacketSend},
         rpc::{AsyncCall, Caller},
-        stream::{handshake::Handshake, UseCompress, UseCrypto}, Connection,
+        stream::{handshake::Handshake, UseCompress, UseCrypto},
+        Connection,
     },
     error,
     runner::{FnRunnable, NamedRunnable, Rise, ServiceRunner},
@@ -111,7 +112,7 @@ async fn enter_forward_service_main(
             log::error!("fail to handshake {e:?}");
             return Ok(Rise::Restart);
         }
-    };                                                                                                                                                                                                                                                                                              
+    };
 
     stream.write_config(&service).await?;
 
@@ -126,11 +127,15 @@ async fn enter_forward_service_main(
     loop {
         let (linker, target) = forwarder.accept().await?;
 
-        log::debug!("connect to {}", linker);
+        log::debug!("start forward ....");
+
+        tokio::spawn(async move{
+
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            drop(linker);
+        });
     }
 }
-
-
 
 
 async fn enter_proxy_service_main(

@@ -24,8 +24,7 @@ impl Linker {
     }
 }
 
-
-impl Display for Linker{
+impl Display for Linker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "token={}", self.token)
     }

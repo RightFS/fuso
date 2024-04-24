@@ -8,13 +8,13 @@ use crate::{
         future::LazyFuture,
         task::{setter, Setter},
         token::IncToken,
-        Stream,
+        BoxedFuture, Stream,
     },
-    error,
+    error::{self, FusoError},
     runtime::Runtime,
 };
 
-use super::{lopper::Looper, AsyncCall, Cmd};
+use super::{polling::Looper, AsyncCall, Cmd, Transact};
 use crate::core::rpc::Encoder;
 use crate::core::split::SplitStream;
 
@@ -64,38 +64,29 @@ where
     T: serde::Serialize + Send + 'static,
     S: Send + Unpin + 'caller,
 {
-    type Output = error::Result<Vec<u8>>;
+    type Output<'a> = BoxedFuture<'a, error::Result<Vec<u8>>> where S: 'a;
 
-    fn poll_call(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        arg: &T,
-    ) -> std::task::Poll<Self::Output> {
-        let this = self.project();
+    fn call<'a>(&'a mut self, arg: T) -> Self::Output<'a> {
+        let data = arg.encode();
+        let (setter, getter) = setter();
+        let token = self.calls.add(setter);
 
-        let mut caller = this.caller.lock();
-
-        Pin::new(&mut caller).poll(cx, move || {
-            let data = arg.encode();
-            let (setter, getter) = setter();
-            let token = this.calls.add(setter);
-
+        Box::pin(async move {
             let result = match data {
-                Ok(packet) => {
-                    this.request.send_sync(Cmd::Transact { token, packet });
-                    Ok(())
-                }
+                Ok(packet) => self.request.send(Cmd::Transact { token, packet }).await,
                 Err(error) => {
-                    this.calls.cancel(token);
+                    self.calls.cancel(token);
                     Err(error)
                 }
             };
 
-            async move {
-                match result {
-                    Ok(_) => getter.await,
+            match result {
+                Err(e) => Err(e),
+                Ok(_) => match getter.await {
+                    Ok(o) => Ok(o),
+                    Err(FusoError::InvaledSetter) => Err(FusoError::Cancel),
                     Err(e) => Err(e),
-                }
+                },
             }
         })
     }
@@ -103,15 +94,21 @@ where
 
 impl<'a> Looper<'a> {
     async fn run_command_consumer<R>(
-        receiver: Receiver<(u64, Vec<u8>)>,
+        receiver: Receiver<Transact>,
         calls: Calls,
     ) -> error::Result<()>
     where
         R: Runtime,
     {
         loop {
-            let (token, packet) = receiver.recv().await?;
-            calls.wake(token, packet)?;
+            match receiver.recv().await? {
+                Transact::Cancel(token) => {
+                    calls.cancel(token);
+                }
+                Transact::Request(token, packet) => {
+                    calls.wake(token, packet)?;
+                }
+            }
         }
     }
 }

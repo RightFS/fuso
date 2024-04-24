@@ -3,12 +3,13 @@ use std::{future::Future, marker::PhantomData, pin::Pin};
 use crate::{
     core::{
         rpc::{
-            self, structs::port_forward::Request, AsyncCallee, Callee, Caller, Decoder, Looper,
+            self, structs::port_forward::Request, AsyncCallee, Callee, Decoder, Looper,
             Responder,
         },
         Stream,
     },
     error,
+    runtime::Runtime,
 };
 
 pub struct Transport<'transport, S> {
@@ -21,7 +22,10 @@ impl<'transport, S> Transport<'transport, S>
 where
     S: Stream + Send + Unpin + 'transport,
 {
-    pub fn new<R>(heartbeat_delay: std::time::Duration, stream: S) -> Self {
+    pub fn new<R>(heartbeat_delay: std::time::Duration, stream: S) -> Self
+    where
+        R: Runtime,
+    {
         let (lopper, callee) = rpc::Callee::new(stream, heartbeat_delay);
 
         Self {
