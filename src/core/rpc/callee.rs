@@ -1,5 +1,7 @@
 use std::{future::Future, marker::PhantomData, pin::Pin, task::Poll};
 
+use serde::Serialize;
+
 use crate::{
     core::{
         channel::{self, Receiver, Sender},
@@ -14,6 +16,7 @@ use crate::{
 };
 
 use super::{structs::port_forward::Request, AsyncCallee, Cmd, Decoder, Transact};
+use crate::core::rpc::Encoder;
 use crate::core::split::SplitStream;
 
 pub struct Callee<'looper> {
@@ -25,7 +28,7 @@ pub struct Callee<'looper> {
 
 pub struct Responder {
     token: u64,
-    guard: Setter<()>,
+    guard: Option<Setter<()>>,
     responder: Sender<Cmd>,
 }
 
@@ -58,7 +61,7 @@ impl Responder {
         sender: Sender<Cmd>,
     ) -> error::Result<()> {
         let mut calls = Vec::new();
-        std::future::poll_fn(|cx| {
+        std::future::poll_fn(move |cx| {
             let mut polled = false;
 
             while !polled {
@@ -73,7 +76,8 @@ impl Responder {
                 calls.retain_mut(|(token, getter)| match Pin::new(getter).poll(cx) {
                     Poll::Pending => true,
                     Poll::Ready(Ok(())) => false,
-                    Poll::Ready(Err(_)) => {
+                    Poll::Ready(Err(e)) => {
+                        log::debug!("{}", e);
                         sender.send_sync(Cmd::Cancel(*token));
                         false
                     }
@@ -85,7 +89,6 @@ impl Responder {
         .await
     }
 }
-
 
 impl AsyncCallee for Callee<'_> {
     type Output = error::Result<(Vec<u8>, Responder)>;
@@ -111,7 +114,7 @@ impl AsyncCallee for Callee<'_> {
                         packet,
                         Responder {
                             token,
-                            guard: setter,
+                            guard: Some(setter),
                             responder: self.responder.clone(),
                         },
                     )
@@ -121,10 +124,32 @@ impl AsyncCallee for Callee<'_> {
     }
 }
 
+impl Responder {
+    pub async fn replay<T>(mut self, result: T) -> error::Result<()>
+    where
+        T: Serialize,
+    {
+        let result = self
+            .responder
+            .send(Cmd::Transact {
+                token: self.token,
+                packet: result.encode()?,
+            })
+            .await;
+
+        if let Some(guard) = self.guard.take() {
+            let _ = guard.set(());
+        }
+
+        result
+    }
+}
 
 impl Drop for Responder {
     fn drop(&mut self) {
-        self.guard.invalid();
-        log::debug!("cleaned callee {}", self.token);
+        if let Some(mut guard) = self.guard.take() {
+            guard.invalid();
+            log::trace!("cleaned rpc task. token={}", self.token);
+        }
     }
 }

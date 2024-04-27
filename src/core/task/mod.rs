@@ -22,6 +22,7 @@ pub struct Getter<V> {
 
 pub struct Setter<V> {
     val: Arc<Mutex<ValState<V>>>,
+    setted: bool,
     waker: Arc<Mutex<Option<Waker>>>,
 }
 
@@ -29,6 +30,7 @@ impl<V> Setter<V> {
     pub fn set(mut self, val: V) -> error::Result<()> {
         drop(self.val.lock().replace(val));
         self.try_wake();
+        self.setted = true;
         Ok(())
     }
 
@@ -46,7 +48,9 @@ impl<V> Setter<V> {
 
 impl<V> Drop for Setter<V> {
     fn drop(&mut self) {
-        self.invalid();
+        if !self.setted {
+            self.invalid();
+        }
     }
 }
 
@@ -87,15 +91,14 @@ impl<V> ValState<V> {
 
 pub fn setter<V>() -> (Setter<V>, Getter<V>) {
     let val = Arc::new(Mutex::new(ValState::Nil));
+    let waker = Arc::new(Mutex::new(None));
 
     (
         Setter {
             val: val.clone(),
-            waker: Default::default(),
+            waker: waker.clone(),
+            setted: false,
         },
-        Getter {
-            val,
-            waker: Default::default(),
-        },
+        Getter { val, waker },
     )
 }

@@ -203,31 +203,29 @@ where
 
     let mut accepter = MultiAccepter::new();
 
-    if let Some(ref channels) = conf.channel {
-        for expose in channels {
-            match expose {
-                Expose::Kcp(ip, port) => {
-                    accepter.add(ForwardAccepter::new_visitor(
-                        KcpListener::bind(Default::default(), ip.to_addr(*port)).await?,
-                    ));
-                }
-                Expose::Tcp(ip, port) => accepter.add(ForwardAccepter::new_visitor(
-                    TcpListener::bind(ip.to_addr(*port)).await?,
-                )),
+    for expose in conf.exposes.iter() {
+        match expose {
+            Expose::Kcp(ip, port) => {
+                accepter.add(ForwardAccepter::new_visitor(
+                    KcpListener::bind(Default::default(), ip.to_addr(*port)).await?,
+                ));
             }
+            Expose::Tcp(ip, port) => accepter.add(ForwardAccepter::new_visitor(
+                TcpListener::bind(ip.to_addr(*port)).await?,
+            )),
         }
     }
 
-    if conf.channel.is_some() {
-        for expose in conf.exposes.iter() {
+    if let Some(ref channels) = conf.channel {
+        for expose in channels.iter() {
             match expose {
                 Expose::Tcp(ip, port) => {
-                    accepter.add(ForwardAccepter::new_visitor(
+                    accepter.add(ForwardAccepter::new_mapping(
                         TcpListener::bind(ip.to_addr(*port)).await?,
                     ));
                 }
                 Expose::Kcp(ip, port) => {
-                    accepter.add(ForwardAccepter::new_visitor({
+                    accepter.add(ForwardAccepter::new_mapping({
                         KcpListener::bind(Default::default(), ip.to_addr(*port)).await?
                     }));
                 }
@@ -261,8 +259,11 @@ where
 
     loop {
         let (c1, c2) = forwarder.accept().await?;
+        log::debug!("start forward ................");
+        tokio::spawn(async move {
+            if let Err(e) = c1.transfer(c2).await {
+                log::warn!("{e}")
+            };
+        });
     }
-
-    Ok(())
 }
- 

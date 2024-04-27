@@ -1,12 +1,9 @@
 use std::net::SocketAddr;
 
 use crate::{
-    core::{
-        accepter::Accepter, connector::Connector, processor::Preprocessor,
-        rpc::structs::port_forward::VisitorProtocol, AbstractStream, Connection, Stream,
-    },
-    error,
-    server::port_forward::{MuxAccepter, Whence},
+    client::port_forward::Protocol, core::{
+        accepter::Accepter, connector::Connector, processor::Preprocessor, rpc::structs::port_forward::VisitorProtocol, transfer::AbstractTransmitter, AbstractStream, Connection, Stream
+    }, error, server::port_forward::{MuxAccepter, Whence}
 };
 
 use super::TokioRuntime;
@@ -42,7 +39,7 @@ where
 {
     pub fn new<C>(transport: S, connector: C) -> Self
     where
-        C: Connector<(), Output = Connection<'static>> + Send + Unpin + 'static,
+        C: Connector<Protocol, Output = AbstractTransmitter<'static>> + Sync + Send + Unpin + 'static,
     {
         Self::new_with_runtime(transport, connector)
     }

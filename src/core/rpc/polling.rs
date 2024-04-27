@@ -92,8 +92,8 @@ impl<'looper> Looper<'looper> {
     {
         let mut writer = writer;
         loop {
-            let pkt = receiver.recv().await?.encode()?;
-            log::debug!("send to transport {}bytes", pkt.len());
+            let pkt: Vec<u8> = receiver.recv().await?.encode()?;
+            log::trace!("send to transport {}bytes", pkt.len());
             writer.send_packet(&pkt).await?;
         }
     }

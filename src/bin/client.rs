@@ -2,13 +2,13 @@ use std::{net::SocketAddr, time::Duration};
 
 use fuso::{
     cli,
-    client::port_forward::PortForwarder,
+    client::port_forward::{MuxConnector, PortForwarder, Protocol},
     config::{
         client::{
             Config, FinalTarget, Host, ServerAddr, Service, WithBridgeService, WithForwardService,
             WithProxyService,
         },
-        Stateful,
+        Expose, Stateful,
     },
     core::{
         accepter::AccepterExt,
@@ -18,7 +18,8 @@ use fuso::{
         protocol::{AsyncPacketRead, AsyncPacketSend},
         rpc::{AsyncCall, Caller},
         stream::{handshake::Handshake, UseCompress, UseCrypto},
-        Connection,
+        transfer::AbstractTransmitter,
+        AbstractStream, Connection,
     },
     error,
     runner::{FnRunnable, NamedRunnable, Rise, ServiceRunner},
@@ -91,11 +92,16 @@ async fn enter_forward_service_main(
 
     let result = server
         .try_connect(|host, port| async move {
-            log::debug!("connect to server {host}:{port}");
-            match host {
+            log::trace!("connect to server {host}:{port}");
+            let connection = match host {
                 Host::Ip(ip) => TcpStream::connect(SocketAddr::new(*ip, port)).await,
                 Host::Domain(domain) => TcpStream::connect(format!("{domain}:{port}")).await,
-            }
+            };
+
+            connection.map(|c| {
+                log::debug!("connection established: {host}:{port}");
+                c
+            })
         })
         .await?
         .use_crypto(crypto.iter())
@@ -116,27 +122,84 @@ async fn enter_forward_service_main(
 
     stream.write_config(&service).await?;
 
-    let mut connector = MultiConnector::<(), Connection<'static>>::new();
+    let mut connector = MultiConnector::<Protocol, AbstractTransmitter<'static>>::new();
 
-    if let Some(channel) = service.channel.as_ref() {
-        // connector.add(connector)
+    if let Some(channels) = service.channel.as_ref() {
+        for expose in channels.iter() {
+            match expose {
+                Expose::Kcp(_, _) => todo!(),
+                Expose::Tcp(_, port) => {
+                    let port = *port;
+                    let addr = server.addr.clone();
+                    connector.add(move |proto| {
+                        let addr = addr.clone();
+                        async move {
+                            addr.try_connect(port, |host, port| async move {
+                                let connection = match host {
+                                    Host::Ip(ip) => {
+                                        TcpStream::connect(SocketAddr::new(*ip, port)).await
+                                    }
+                                    Host::Domain(domain) => {
+                                        TcpStream::connect(format!("{domain}:{port}")).await
+                                    }
+                                }?;
+
+                                Ok(AbstractStream::new(connection).into())
+                            })
+                            .await
+                        }
+                    })
+                }
+            }
+        }
+    } else {
+        for expose in service.exposes.clone() {
+            let addr = server.addr.clone();
+            match expose {
+                Expose::Kcp(_, port) => todo!(),
+                Expose::Tcp(_, port) => connector.add(MuxConnector::new(move |proto| {
+                    let addr = addr.clone();
+                    async move {
+                        addr.try_connect(port, |host, port| async move {
+                            let connection = match host {
+                                Host::Ip(ip) => {
+                                    TcpStream::connect(SocketAddr::new(*ip, port)).await
+                                }
+                                Host::Domain(domain) => {
+                                    TcpStream::connect(format!("{domain}:{port}")).await
+                                }
+                            }?;
+
+                            Ok(AbstractStream::new(connection).into())
+                        })
+                        .await
+                    }
+                })),
+            }
+        }
     }
 
     let mut forwarder = PortForwarder::new(stream, connector);
 
+    log::debug!("forward started .");
+
     loop {
-        let (linker, target) = forwarder.accept().await?;
-
-        log::debug!("start forward ....");
-
-        tokio::spawn(async move{
-
+        let (mut linker, target) = forwarder.accept().await?;
+        tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            drop(linker);
+            match linker.link(Protocol::Tcp).await {
+                Ok(transmitter) => {
+                    log::debug!("conneced ...");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                 
+                }
+                Err(e) => {
+                    log::debug!("{:?}", e);
+                }
+            }
         });
     }
 }
-
 
 async fn enter_proxy_service_main(
     config: Stateful<Config>,

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, pin::Pin, sync::Arc};
+use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use parking_lot::Mutex;
 
@@ -16,7 +16,6 @@ use crate::{
 
 use super::{polling::Looper, AsyncCall, Cmd, Transact};
 use crate::core::rpc::Encoder;
-use crate::core::split::SplitStream;
 
 #[derive(Default, Clone)]
 pub struct Calls {
@@ -24,11 +23,9 @@ pub struct Calls {
     inc_token: IncToken,
 }
 
-#[pin_project::pin_project]
 pub struct Caller<S> {
     calls: Calls,
     request: Sender<Cmd>,
-    #[pin]
     caller: Arc<Mutex<LazyFuture<'static, error::Result<Vec<u8>>>>>,
     marked: PhantomData<S>,
 }
@@ -133,10 +130,6 @@ impl Calls {
 
     fn cancel(&self, token: u64) {
         drop(self.call_list.lock().remove(&token))
-    }
-
-    fn cancel_all(&self) {
-        self.call_list.lock().clear();
     }
 }
 

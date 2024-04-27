@@ -1,48 +1,42 @@
 use std::{
+    future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use crate::error;
 
+use super::BoxedFuture;
+
+pub trait IntoConnector<'a, C, T, O> {
+    fn into(self) -> AbstractConnector<'a, T, O>;
+}
+
 pub trait Connector<Target> {
     type Output;
 
-    fn poll_connect(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        target: &Target,
-    ) -> Poll<error::Result<Self::Output>>;
+    fn connect<'conn>(
+        &'conn self,
+        target: Target,
+    ) -> BoxedFuture<'conn, error::Result<Self::Output>>;
 }
-
-#[pin_project::pin_project]
-pub struct Connect<'a, C, T> {
-    target: T,
-    #[pin]
-    connector: &'a mut C,
-}
-
-pub trait ConnectExt<T, O>: Connector<T, Output = O> {
-    fn connect<'a>(&'a mut self, target: T) -> Connect<'a, Self, T>
-    where
-        Self: Sized,
-    {
-        Connect {
-            target,
-            connector: self,
-        }
-    }
-}
-
-impl<C, T, O> ConnectExt<T, O> for C where C: Connector<T, Output = O> {}
 
 pub struct AbstractConnector<'connector, T, O>(
     Box<dyn Connector<T, Output = O> + Send + Unpin + 'connector>,
 );
 
+pub struct ReplicableConnector<'connector, T, O>(pub Arc<AbstractConnector<'connector, T, O>>);
+
+pub struct ConnectorWithFn<'connector, T, O> {
+    f: Box<dyn Fn(T) -> BoxedFuture<'connector, error::Result<O>> + Send + Sync>,
+}
+
 pub struct MultiConnector<'a, T, O> {
     connectors: Vec<AbstractConnector<'a, T, O>>,
 }
+
+unsafe impl<T, O> Sync for AbstractConnector<'_, T, O> {}
 
 impl<'connector, T, O> AbstractConnector<'connector, T, O> {
     pub fn new<C>(connector: C) -> Self
@@ -60,60 +54,79 @@ impl<'a, T, O> MultiConnector<'a, T, O> {
         }
     }
 
-    pub fn add<C>(&mut self, connector: C)
+    pub fn add<I, C>(&mut self, connector: I)
     where
-        C: Connector<T, Output = O> + Send + Unpin + 'a,
+        I: IntoConnector<'a, C, T, O>,
     {
-        self.connectors.push(AbstractConnector(Box::new(connector)));
-    }
-}
-
-impl<C, T, O> std::future::Future for Connect<'_, C, T>
-where
-    C: Connector<T, Output = O> + Unpin,
-{
-    type Output = error::Result<C::Output>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        Pin::new(&mut **this.connector).poll_connect(cx, &this.target)
+        self.connectors.push(connector.into());
     }
 }
 
 impl<T, O> Connector<T> for AbstractConnector<'_, T, O> {
     type Output = O;
-    fn poll_connect(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        target: &T,
-    ) -> Poll<error::Result<Self::Output>> {
-        Pin::new(&mut *self.0).poll_connect(cx, target)
+    fn connect<'conn>(&'conn self, target: T) -> BoxedFuture<'conn, error::Result<Self::Output>> {
+        self.0.connect(target)
     }
 }
 
-impl<T, O> Connector<T> for MultiConnector<'_, T, O> {
+impl<'connector, T, O> Connector<T> for ReplicableConnector<'connector, T, O> {
+    type Output = O;
+    fn connect<'conn>(&'conn self, target: T) -> BoxedFuture<'conn, error::Result<Self::Output>> {
+        self.0.connect(target)
+    }
+}
+
+impl<T, O> Connector<T> for MultiConnector<'_, T, O>
+where
+    T: Clone + Send,
+{
     type Output = O;
 
-    fn poll_connect(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        target: &T,
-    ) -> Poll<error::Result<Self::Output>> {
-        let mut error = Option::None;
-
-        for connector in self.connectors.iter_mut() {
-            match Pin::new(connector).poll_connect(cx, target) {
-                Poll::Pending => continue,
-                Poll::Ready(Ok(o)) => return Poll::Ready(Ok(o)),
-                Poll::Ready(Err(e)) => {
-                    error.replace(e);
+    fn connect<'conn>(&'conn self, target: T) -> BoxedFuture<'conn, error::Result<Self::Output>> {
+        Box::pin(async move {
+            for connector in self.connectors.iter() {
+                if let Ok(o) = connector.connect(target.clone()).await {
+                    return Ok(o);
                 }
             }
-        }
 
-        match error {
-            None => Poll::Pending,
-            Some(e) => Poll::Ready(Err(e)),
-        }
+            Err(error::FusoError::InvalidConnection)
+        })
+    }
+}
+
+impl<'a, C, T, O> IntoConnector<'a, C, T, O> for C
+where
+    C: Connector<T, Output = O> + Send + Unpin + 'a,
+{
+    fn into(self) -> AbstractConnector<'a, T, O> {
+        AbstractConnector::new(self)
+    }
+}
+
+impl<'a, F, Fut, T, O> IntoConnector<'a, ConnectorWithFn<'a, T, O>, T, O> for F
+where
+    F: Fn(T) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = error::Result<O>> + Send + 'a,
+    T: 'a,
+    O: 'static,
+{
+    fn into(self) -> AbstractConnector<'a, T, O> {
+        AbstractConnector::new(ConnectorWithFn {
+            f: Box::new(move |t| Box::pin((self)(t))),
+        })
+    }
+}
+
+impl<'a, T, O> Connector<T> for ConnectorWithFn<'a, T, O> {
+    type Output = O;
+    fn connect<'conn>(&'conn self, target: T) -> BoxedFuture<'conn, error::Result<Self::Output>> {
+        (self.f)(target)
+    }
+}
+
+impl<'connector, T, O> Clone for ReplicableConnector<'connector, T, O> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }

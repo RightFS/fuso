@@ -127,7 +127,10 @@ pub trait Handshake: Stream + Send + Unpin {
     {
         let config: ClientConfig = config.into();
 
-        Box::pin(async move { self.send_packet(&config.encode()?).await })
+        Box::pin(async move {
+            log::debug!("send configuration information");
+            self.send_packet(&config.encode()?).await
+        })
     }
 }
 

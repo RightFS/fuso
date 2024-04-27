@@ -1,8 +1,13 @@
+mod connector;
 mod linker;
 mod transport;
 
-use self::linker::Linker;
+pub use linker::*;
+pub use connector::*;
 
+
+use crate::core::connector::ReplicableConnector;
+use crate::core::transfer::AbstractTransmitter;
 use crate::{
     core::{
         connector::AbstractConnector,
@@ -10,6 +15,7 @@ use crate::{
     },
     error,
 };
+use std::sync::Arc;
 use std::{marker::PhantomData, pin::Pin, task::Poll};
 
 use crate::{
@@ -21,7 +27,7 @@ use crate::{
 
 pub struct PortForwarder<R, S> {
     transport: Transport<'static, S>,
-    connector: AbstractConnector<'static, (), Connection<'static>>,
+    connector: ReplicableConnector<'static, Protocol, AbstractTransmitter<'static>>,
     _marked: PhantomData<R>,
 }
 
@@ -32,13 +38,13 @@ where
 {
     pub fn new_with_runtime<C>(transport: S, connector: C) -> Self
     where
-        C: Connector<(), Output = Connection<'static>> + Send + Unpin + 'static,
+        C: Connector<Protocol, Output = AbstractTransmitter<'static>> + Sync + Send + Unpin + 'static,
     {
         let transport = Transport::new::<R>(std::time::Duration::from_secs(1), transport);
 
         Self {
             transport,
-            connector: AbstractConnector::new(connector),
+            connector: ReplicableConnector(Arc::new(AbstractConnector::new(connector))),
             _marked: PhantomData,
         }
     }
@@ -58,12 +64,15 @@ where
         match Pin::new(&mut self.transport).poll_next(ctx)? {
             Poll::Pending => Poll::Pending,
             Poll::Ready((request, responder)) => match request {
-                Request::New(token, target) => Poll::Ready(Ok((Linker::new(token, responder), {
-                    match target {
-                        None => FinalTarget::Dynamic,
-                        Some(target) => FinalTarget::Dynamic,
-                    }
-                }))),
+                Request::New(token, target) => Poll::Ready(Ok({
+                    let linker = Linker::new(token, self.connector.clone(), responder);
+                    (linker, {
+                        match target {
+                            None => FinalTarget::Dynamic,
+                            Some(target) => FinalTarget::Dynamic,
+                        }
+                    })
+                })),
             },
         }
     }

@@ -13,10 +13,11 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::{collections::HashMap, pin::Pin, sync::Arc, task::Poll};
 
-use crate::core::future::Poller;
+use crate::core::future::{Poller, Select};
 use crate::core::io::AsyncReadExt;
 use crate::core::rpc::structs::port_forward::{self};
 use crate::core::rpc::AsyncCall;
+use crate::core::task::{setter, Getter, Setter};
 use crate::core::token::IncToken;
 use crate::core::Stream;
 use crate::runtime::Runtime;
@@ -36,7 +37,8 @@ type Connection = crate::core::Connection<'static>;
 
 enum Outcome {
     Ready(u64, Connection),
-    Pending(u64),
+    Mapped(u64),
+    Pending(u64, Getter<()>),
     Timeout(u64),
     Transport(u64, error::FusoError),
     Stopped(Option<error::FusoError>),
@@ -50,7 +52,7 @@ pub enum Whence {
 #[derive(Clone)]
 pub struct Visitors {
     inc_token: IncToken,
-    connections: Arc<Mutex<HashMap<u64, Connection>>>,
+    connections: Arc<Mutex<HashMap<u64, (Connection, Setter<()>)>>>,
 }
 
 pub struct PortForwarder<Runtime, A, T> {
@@ -122,11 +124,22 @@ where
             polled = need_poll;
 
             match outcome {
-                Outcome::Pending(token) => {
-                    self.poller.add(Self::wait_transport(
-                        token,
-                        std::time::Duration::from_secs(10),
-                    ));
+                Outcome::Mapped(token) => match self.visitors.take(token) {
+                    None => {
+                        log::debug!("mapping successful {{ token={token} }}")
+                    }
+                    Some(_) => {
+                        log::debug!("mapping error {{ token={token} }}")
+                    }
+                },
+                Outcome::Pending(token, getter) => {
+                    if self.visitors.exists(token) {
+                        self.poller.add(Self::wait_transport(
+                            token,
+                            getter,
+                            std::time::Duration::from_secs(10),
+                        ));
+                    }
                 }
                 Outcome::Timeout(token) => {
                     if let Some(conn) = self.visitors.take(token) {
@@ -210,10 +223,25 @@ where
     R: Runtime,
     T: AsyncWrite + AsyncRead + Send + Unpin,
 {
-    async fn wait_transport(token: u64, timeout: std::time::Duration) -> error::Result<Outcome> {
+    async fn wait_transport(
+        token: u64,
+        getter: Getter<()>,
+        timeout: std::time::Duration,
+    ) -> error::Result<Outcome> {
         log::debug!("wait for mapping {{ token={token}, timeout={timeout:?} }}");
-        R::sleep(timeout).await;
-        Ok(Outcome::Timeout(token))
+        let mut select = Select::new();
+
+        select.add(async move {
+            R::sleep(timeout).await;
+            Ok(Outcome::Timeout(token))
+        });
+
+        select.add(async move {
+            let _ = getter.await;
+            Ok(Outcome::Mapped(token))
+        });
+
+        select.await
     }
 
     async fn do_prepare_visitor(
@@ -234,7 +262,9 @@ where
 
         log::debug!("create mapping {} -- [T] -- {:?}", conn.addr(), addr);
 
-        let token = visitors.store(conn);
+        let (setter, getter) = setter();
+
+        let token = visitors.store(conn, setter);
 
         let result = R::wait_for(std::time::Duration::from_secs(10), async move {
             match transport.call(Request::New(token, addr)).await {
@@ -250,7 +280,7 @@ where
         match result {
             Err(_) => Ok(Outcome::Transport(token, error::FusoError::NotResponse)),
             Ok(r) => match r {
-                Ok(_) => Ok(Outcome::Pending(token)),
+                Ok(_) => Ok(Outcome::Pending(token, getter)),
                 Err(e) => Ok(Outcome::Transport(token, e)),
             },
         }
@@ -285,14 +315,18 @@ impl Default for Visitors {
 }
 
 impl Visitors {
-    fn take(&self, token: u64) -> Option<Connection> {
-        self.connections.lock().remove(&token)
+    fn exists(&self, token: u64) -> bool {
+        self.connections.lock().contains_key(&token)
     }
 
-    fn store(&self, conn: Connection) -> u64 {
+    fn take(&self, token: u64) -> Option<Connection> {
+        self.connections.lock().remove(&token).map(|(c, _)| c)
+    }
+
+    fn store(&self, conn: Connection, setter: Setter<()>) -> u64 {
         let token = self.next_token();
 
-        self.connections.lock().insert(token, conn);
+        self.connections.lock().insert(token, (conn, setter));
 
         token
     }

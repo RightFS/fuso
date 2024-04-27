@@ -9,6 +9,7 @@ pub enum FusoError {
     Abort,
     AuthError,
     Cancel,
+    InvalidConnection,
     InvaledSetter,
     BadRpcCall(u64),
     InvalidPort,

@@ -1,5 +1,4 @@
 use std::pin::Pin;
-use std::task::Poll;
 
 use crate::core::rpc::{self, Decoder};
 use crate::core::rpc::{Caller, Looper};

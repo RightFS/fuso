@@ -22,7 +22,7 @@ pub struct Receiver<T> {
 }
 
 pub struct Recv<'a, T> {
-    receiver: &'a Container<T>,
+    container: &'a Container<T>,
 }
 
 pub struct Send<'a, T> {
@@ -33,15 +33,12 @@ pub struct Send<'a, T> {
 impl<T> Receiver<T> {
     pub fn recv<'a>(&'a self) -> Recv<'a, T> {
         Recv {
-            receiver: &self.container,
+            container: &self.container,
         }
     }
 
     pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<error::Result<T>> {
-        match self.container.take(cx.waker()) {
-            None => Poll::Pending,
-            Some(t) => Poll::Ready(Ok(t)),
-        }
+        self.container.poll_take(cx)
     }
 }
 
@@ -118,16 +115,16 @@ impl<'a, T> std::future::Future for Recv<'a, T> {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        match self.receiver.take(cx.waker()) {
-            None => Poll::Pending,
-            Some(data) => Poll::Ready(Ok(data)),
-        }
+        self.container.poll_take(cx)
     }
 }
 
 impl<T> Container<T> {
     fn push(&self, data: T) {
-        self.buffer.lock().push_back(data);
+        let mut buf = self.buffer.lock();
+
+        buf.push_back(data);
+
         if let Some(waker) = self.waker.lock().take() {
             waker.wake();
         }
@@ -137,11 +134,16 @@ impl<T> Container<T> {
         match self.buffer.lock().pop_front() {
             Some(data) => Some(data),
             None => {
-                if let Some(waker) = self.waker.lock().replace(waker.clone()) {
-                    waker.wake();
-                }
+                drop(self.waker.lock().replace(waker.clone()));
                 None
             }
+        }
+    }
+
+    pub fn poll_take(&self, cx: &mut Context<'_>) -> Poll<error::Result<T>> {
+        match self.take(cx.waker()) {
+            None => Poll::Pending,
+            Some(t) => Poll::Ready(Ok(t)),
         }
     }
 }
