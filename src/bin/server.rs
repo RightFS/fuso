@@ -203,20 +203,20 @@ where
 
     let mut accepter = MultiAccepter::new();
 
-    for expose in conf.exposes.iter() {
-        match expose {
-            Expose::Kcp(ip, port) => {
-                accepter.add(ForwardAccepter::new_visitor(
-                    KcpListener::bind(Default::default(), ip.to_addr(*port)).await?,
-                ));
-            }
-            Expose::Tcp(ip, port) => accepter.add(ForwardAccepter::new_visitor(
-                TcpListener::bind(ip.to_addr(*port)).await?,
-            )),
-        }
-    }
-
     if let Some(ref channels) = conf.channel {
+        for expose in conf.exposes.iter() {
+            match expose {
+                Expose::Kcp(ip, port) => {
+                    accepter.add(ForwardAccepter::new_visitor(
+                        KcpListener::bind(Default::default(), ip.to_addr(*port)).await?,
+                    ));
+                }
+                Expose::Tcp(ip, port) => accepter.add(ForwardAccepter::new_visitor(
+                    TcpListener::bind(ip.to_addr(*port)).await?,
+                )),
+            }
+        }
+
         for expose in channels.iter() {
             match expose {
                 Expose::Tcp(ip, port) => {

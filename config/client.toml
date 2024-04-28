@@ -13,9 +13,11 @@ auth = { type = "secret", secret = "12345678" }
 type = "forward"
 boot = "fork"
 exposes = [ "8080/tcp" ]
-channel = [ "8002/tcp" ]
+# channel = [ "8002/tcp" ]
 restart = "always"
-target = { type = "static", port = 2222, addr = ["127.0.0.1"] }
+cryptos = ["aes"]
+compress = ["lz4"]
+target = { type = "tcp", port = 9999, addr = ["127.0.0.1"] }
 keep_alive = { interval = 100 }
 
 
@@ -24,7 +26,7 @@ keep_alive = { interval = 100 }
 # boot = "fork"
 # exposes = [ "7888/tcp" ]
 # restart = "always"
-# target = { type = "executable", path = "/bin/bash" }
+# target = { type = "shell", path = "/bin/bash" }
 
 
 # [bridge1]

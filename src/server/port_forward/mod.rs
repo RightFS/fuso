@@ -144,7 +144,7 @@ where
                 Outcome::Timeout(token) => {
                     if let Some(conn) = self.visitors.take(token) {
                         log::warn!(
-                            "failed to create mapping {{ token={}, addr={}, msg='timeout' }}",
+                            "failed to create mapping {{ token={}, addr={}, reason='Timeout' }}",
                             token,
                             conn.addr()
                         );
@@ -167,7 +167,7 @@ where
                 Outcome::Transport(token, transport) => {
                     if let Some(conn) = self.visitors.take(token) {
                         log::warn!(
-                            "failed to create mapping {{ token={}, addr={}, msg='{}' }}",
+                            "failed to create mapping {{ token={}, addr={}, reason='{}' }}",
                             token,
                             conn.addr(),
                             transport
@@ -271,6 +271,7 @@ where
                 Err(e) => Err(e),
                 Ok(resp) => match resp {
                     port_forward::Response::Ok => Ok(()),
+                    port_forward::Response::Cancel => Err(error::FusoError::Cancel),
                     port_forward::Response::Error(msg) => Err(msg.into()),
                 },
             }

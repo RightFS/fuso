@@ -144,8 +144,15 @@ pub struct WithHttpHeaderRewrite {
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum FinalTarget {
     /// 静态地址
-    Static { addr: ServerAddr, port: u16 },
-    Executable {
+    Tcp {
+        addr: ServerAddr,
+        port: u16,
+    },
+    Udp {
+        addr: ServerAddr,
+        port: u16,
+    },
+    Shell {
         path: String,
         #[serde(default = "Default::default")]
         args: Vec<String>,
@@ -270,7 +277,6 @@ impl Config {
         Ok(())
     }
 }
-
 
 /// 默认随机分配一个端口
 fn default_exposes() -> HashSet<Expose> {

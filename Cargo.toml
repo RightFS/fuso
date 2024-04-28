@@ -22,6 +22,10 @@ path = "src/bin/client.rs"
 name = "fus"
 path = "src/bin/server.rs"
 
+[[bin]]
+name = "fuso"
+path = "src/bin/main.rs"
+
 [profile.release]
 lto = true
 debug = false

@@ -1,6 +1,6 @@
 use std::{
     io,
-    pin::{self, Pin},
+    pin::Pin,
     task::{Context, Poll},
 };
 
@@ -23,6 +23,13 @@ pub struct TransmitSendAll<'t, T> {
     transmitter: &'t mut T,
 }
 
+#[pin_project::pin_project]
+pub struct TransmitRecv<'t, T> {
+    buf: &'t mut [u8],
+    #[pin]
+    transmitter: &'t mut T,
+}
+
 pub trait Transmitter: Unpin {
     fn poll_send(
         self: Pin<&mut Self>,
@@ -38,6 +45,16 @@ pub trait Transmitter: Unpin {
 }
 
 pub trait TransmitterExt: Transmitter {
+    fn recv<'a>(&'a mut self, buf: &'a mut [u8]) -> TransmitRecv<'a, Self>
+    where
+        Self: Sized,
+    {
+        TransmitRecv {
+            buf,
+            transmitter: self,
+        }
+    }
+
     fn send<'a>(&'a mut self, data: &'a [u8]) -> TransmitSend<'a, Self>
     where
         Self: Sized,
@@ -150,5 +167,17 @@ where
         }
 
         Poll::Ready(Ok(()))
+    }
+}
+
+impl<'t, T> std::future::Future for TransmitRecv<'t, T>
+where
+    T: Transmitter,
+{
+    type Output = error::Result<usize>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        Pin::new(&mut **this.transmitter).poll_recv(cx, this.buf)
     }
 }

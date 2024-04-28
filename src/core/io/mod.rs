@@ -6,7 +6,7 @@ use std::{
 
 use crate::{error, select};
 
-use super::BoxedFuture;
+use super::{BoxedFuture, Stream};
 
 use crate::core::split::SplitStream;
 
@@ -79,7 +79,7 @@ pub trait StreamExt {
     fn transfer<'a, T>(self, to: T) -> BoxedFuture<'a, error::Result<()>>
     where
         T: AsyncRead + AsyncWrite + Unpin + Send + 'a,
-        Self: Sized + AsyncRead + AsyncWrite + Unpin + Send + 'a,
+        Self: Sized + Stream + Unpin + Send + 'a,
     {
         Box::pin(async move {
             let (reader_2, writer_2) = to.split();
@@ -103,7 +103,7 @@ pub trait StreamExt {
                     break Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
                 }
 
-                to.write_all(&buf).await?;
+                to.write_all(&buf[..n]).await?;
             }
         })
     }

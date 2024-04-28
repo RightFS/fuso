@@ -22,6 +22,7 @@ pub struct Linker {
 
 pub enum Reason {
     Cancel,
+    Error(error::FusoError),
 }
 
 #[derive(Debug, Clone)]
@@ -45,9 +46,10 @@ impl Linker {
     }
 
     pub async fn link(self, poto: Protocol) -> error::Result<AbstractTransmitter<'static>> {
+        let mut transmitter = self.connector.connect(poto).await?;
+
         self.responder.replay(Response::Ok).await?;
 
-        let mut transmitter = self.connector.connect(poto).await?;
         let token = self.token.to_be_bytes();
 
         transmitter.send_all(&token).await?;
@@ -60,14 +62,26 @@ impl Linker {
         R: Into<Reason>,
     {
         let reason = reason.into();
-
-        Ok(())
+        self.responder
+            .replay({
+                match reason {
+                    Reason::Cancel => Response::Cancel,
+                    Reason::Error(e) => Response::Error(e.to_string()),
+                }
+            })
+            .await
     }
 }
 
 impl From<()> for Reason {
-    fn from(value: ()) -> Self {
+    fn from(_: ()) -> Self {
         Self::Cancel
+    }
+}
+
+impl From<error::FusoError> for Reason {
+    fn from(e: error::FusoError) -> Self {
+        Self::Error(e)
     }
 }
 

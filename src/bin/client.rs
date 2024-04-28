@@ -8,17 +8,17 @@ use fuso::{
             Config, FinalTarget, Host, ServerAddr, Service, WithBridgeService, WithForwardService,
             WithProxyService,
         },
-        Expose, Stateful,
+        Compress, Crypto, Expose, Stateful,
     },
     core::{
         accepter::AccepterExt,
         connector::MultiConnector,
-        io::{AsyncReadExt, StreamExt},
+        io::{AsyncReadExt, AsyncWriteExt, StreamExt},
         net::{TcpListener, TcpStream},
         protocol::{AsyncPacketRead, AsyncPacketSend},
         rpc::{AsyncCall, Caller},
-        stream::{handshake::Handshake, UseCompress, UseCrypto},
-        transfer::AbstractTransmitter,
+        stream::{compress::CompressedStream, handshake::Handshake, UseCompress, UseCrypto},
+        transfer::{AbstractTransmitter, TransmitterExt},
         AbstractStream, Connection,
     },
     error,
@@ -82,6 +82,26 @@ fn enter_fuso_main(mut conf: Config) -> ServiceRunner<'static, TokioRuntime> {
     sp.build()
 }
 
+async fn try_tcp_connect<'a, Cr, Co>(
+    addr: ServerAddr,
+    port: u16,
+    cryptos: Cr,
+    compress: Co,
+) -> error::Result<CompressedStream<'static>>
+where
+    Cr: Iterator<Item = &'a Crypto>,
+    Co: Iterator<Item = &'a Compress>,
+{
+    addr.try_connect(port, |host, port| async move {
+        match host {
+            Host::Ip(ip) => TcpStream::connect(SocketAddr::new(*ip, port)).await,
+            Host::Domain(domain) => TcpStream::connect(format!("{domain}:{port}")).await,
+        }
+    })
+    .await
+    .map(|stream| stream.use_crypto(cryptos).use_compress(compress))
+}
+
 async fn enter_forward_service_main(
     config: Stateful<Config>,
     service: WithForwardService,
@@ -130,23 +150,17 @@ async fn enter_forward_service_main(
                 Expose::Kcp(_, _) => todo!(),
                 Expose::Tcp(_, port) => {
                     let port = *port;
+                    let cryptos = service.crypto.clone();
+                    let compress = service.compress.clone();
                     let addr = server.addr.clone();
                     connector.add(move |proto| {
                         let addr = addr.clone();
+                        let cryptos = cryptos.clone();
+                        let compress = compress.clone();
                         async move {
-                            addr.try_connect(port, |host, port| async move {
-                                let connection = match host {
-                                    Host::Ip(ip) => {
-                                        TcpStream::connect(SocketAddr::new(*ip, port)).await
-                                    }
-                                    Host::Domain(domain) => {
-                                        TcpStream::connect(format!("{domain}:{port}")).await
-                                    }
-                                }?;
-
-                                Ok(AbstractStream::new(connection).into())
-                            })
-                            .await
+                            try_tcp_connect(addr, port, cryptos.iter(), compress.iter())
+                                .await
+                                .map(Into::into)
                         }
                     })
                 }
@@ -155,6 +169,7 @@ async fn enter_forward_service_main(
     } else {
         for expose in service.exposes.clone() {
             let addr = server.addr.clone();
+
             match expose {
                 Expose::Kcp(_, port) => todo!(),
                 Expose::Tcp(_, port) => connector.add(MuxConnector::new(move |proto| {
@@ -179,22 +194,48 @@ async fn enter_forward_service_main(
         }
     }
 
-    let mut forwarder = PortForwarder::new(stream, connector);
+    let mut forwarder = PortForwarder::new(stream, service.target, connector);
 
     log::debug!("forward started .");
 
     loop {
         let (mut linker, target) = forwarder.accept().await?;
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            match linker.link(Protocol::Tcp).await {
-                Ok(transmitter) => {
-                    log::debug!("conneced ...");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                 
-                }
-                Err(e) => {
-                    log::debug!("{:?}", e);
+            log::debug!("target {:?}", target);
+
+            match target {
+                FinalTarget::Udp { addr, port } => todo!(),
+                FinalTarget::Shell { path, args } => todo!(),
+                FinalTarget::Dynamic => todo!(),
+                FinalTarget::Tcp { addr, port } => {
+                    let result = addr
+                        .try_connect(port, |host, port| async move {
+                            match host {
+                                Host::Ip(ip) => {
+                                    TcpStream::connect(SocketAddr::new(*ip, port)).await
+                                }
+                                Host::Domain(domain) => {
+                                    TcpStream::connect(format!("{domain}:{port}")).await
+                                }
+                            }
+                        })
+                        .await;
+
+                    match result {
+                        Ok(mut stream) => match linker.link(Protocol::Tcp).await {
+                            Ok(mut transmitter) => {
+                                log::debug!("start forwarding ......");
+                            }
+                            Err(e) => {
+                                log::debug!("{:?}", e);
+                            }
+                        },
+                        Err(e) => {
+                            if let Err(e) = linker.cancel(e).await {
+                                log::warn!("{:?}", e);
+                            };
+                        }
+                    }
                 }
             }
         });
