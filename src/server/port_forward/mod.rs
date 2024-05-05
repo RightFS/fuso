@@ -25,7 +25,7 @@ use crate::{
     core::{
         accepter::Accepter,
         io::{AsyncRead, AsyncWrite},
-        processor::{Preprocessor, WrappedPreprocessor},
+        processor::{Preprocessor, AbstractPreprocessor},
         rpc::structs::port_forward::{Request, VisitorProtocol},
     },
     error,
@@ -60,8 +60,8 @@ pub struct PortForwarder<Runtime, A, T> {
     accepter: A,
     visitors: Visitors,
     transport: Transport<T>,
-    prepmap: WrappedPreprocessor<'static, Connection, error::Result<Connection>>,
-    prepvis: WrappedPreprocessor<'static, Connection, error::Result<VisitorProtocol>>,
+    prepmap: AbstractPreprocessor<'static, Connection, error::Result<Connection>>,
+    prepvis: AbstractPreprocessor<'static, Connection, error::Result<VisitorProtocol>>,
     _marked: PhantomData<Runtime>,
 }
 
@@ -126,7 +126,7 @@ where
             match outcome {
                 Outcome::Mapped(token) => match self.visitors.take(token) {
                     None => {
-                        log::debug!("mapping successful {{ token={token} }}")
+                        log::trace!("mapping successful {{ token={token} }}")
                     }
                     Some(_) => {
                         log::debug!("mapping error {{ token={token} }}")
@@ -188,7 +188,7 @@ where
     T: Stream + Unpin + Send + 'static,
     R: Runtime + 'static,
 {
-    pub fn new_with_runtime<P, M>(stream: T, accepter: A, prepvis: P, prepmap: M) -> Self
+    pub fn new_with_runtime<P, M>(transport: T, accepter: A, prepvis: P, prepmap: M) -> Self
     where
         P: Preprocessor<Connection, Output = error::Result<VisitorProtocol>>,
         P: Send + Sync + 'static,
@@ -197,7 +197,7 @@ where
     {
         let mut poller = Poller::new();
 
-        let (transport, hold) = Transport::new::<R>(std::time::Duration::from_secs(10), stream);
+        let (transport, hold) = Transport::new::<R>(std::time::Duration::from_secs(10), transport);
 
         poller.add(async move {
             match hold.await {
@@ -211,8 +211,8 @@ where
             accepter,
             transport,
             visitors: Default::default(),
-            prepvis: WrappedPreprocessor(Arc::new(prepvis)),
-            prepmap: WrappedPreprocessor(Arc::new(prepmap)),
+            prepvis: AbstractPreprocessor(Arc::new(prepvis)),
+            prepmap: AbstractPreprocessor(Arc::new(prepmap)),
             _marked: PhantomData,
         }
     }
@@ -228,7 +228,8 @@ where
         getter: Getter<()>,
         timeout: std::time::Duration,
     ) -> error::Result<Outcome> {
-        log::debug!("wait for mapping {{ token={token}, timeout={timeout:?} }}");
+        log::trace!("wait for mapping {{ token={token}, timeout={timeout:?} }}");
+
         let mut select = Select::new();
 
         select.add(async move {
@@ -248,7 +249,7 @@ where
         conn: Connection,
         visitors: Visitors,
         transport: Transport<T>,
-        preprocessor: WrappedPreprocessor<'_, Connection, error::Result<VisitorProtocol>>,
+        preprocessor: AbstractPreprocessor<'_, Connection, error::Result<VisitorProtocol>>,
     ) -> error::Result<Outcome> {
         let mut transport = transport;
 
@@ -290,7 +291,7 @@ where
     async fn do_prepare_mapping(
         conn: Connection,
         _: Transport<T>,
-        preprocessor: WrappedPreprocessor<'_, Connection, error::Result<Connection>>,
+        preprocessor: AbstractPreprocessor<'_, Connection, error::Result<Connection>>,
     ) -> error::Result<Outcome> {
         let mut conn = preprocessor.prepare(conn).await?;
 

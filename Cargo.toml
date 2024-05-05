@@ -37,10 +37,11 @@ codegen-units = 1
 panic = 'abort'
 
 [features]
-default = ["fuso-config", "fuso-cli", "fuso-kcp", "fuso-rt-tokio", "fuso-manager"]
+default = ["fuso-config", "fuso-cli", "fuso-kcp", "fuso-rt-tokio", "fuso-manager", "fuso-socks5"]
 fuso-kcp = ["kcp-rust"]
 fuso-cli = ["clap"]
 fuso-serde = ["serde"]
+fuso-socks5 = [ "dep:fuso-socks" ]
 fuso-config = ["toml", "serde"]
 fuso-runtime = []
 fuso-rt-tokio = ["dep:tokio", "fuso-runtime"]
@@ -57,7 +58,7 @@ env_logger = "0.11.2"
 log = "0.4.16"
 pin-project = "1.1.4"
 parking_lot = "0.12.1"
-bincode = "1.3.3"
+rmp-serde = "1.3.0"
 rand = "0.8.5"
 
 [dependencies.kcp-rust]

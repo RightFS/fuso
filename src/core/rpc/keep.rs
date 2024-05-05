@@ -13,9 +13,15 @@ impl Heartbeat {
         (Poller::new(), Self {})
     }
 
-    pub(super) fn pong(&self) {}
+    pub(super) fn pong(&self) {
+        
+    }
 
-    pub(super) fn ping(&self) {}
+    pub(super) fn ping(&self) {
 
-    pub(super) fn interrupt(&self) {}
+    }
+
+    pub(super) fn interrupt(&self) {
+        
+    }
 }

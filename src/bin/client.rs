@@ -16,8 +16,12 @@ use fuso::{
         io::{AsyncReadExt, AsyncWriteExt, StreamExt},
         net::{TcpListener, TcpStream},
         protocol::{AsyncPacketRead, AsyncPacketSend},
-        rpc::{AsyncCall, Caller},
-        stream::{compress::CompressedStream, handshake::Handshake, UseCompress, UseCrypto},
+        rpc::{AsyncCall, Caller, Encoder},
+        stream::{
+            compress::CompressedStream,
+            handshake::{Handshake, MuxConfig},
+            UseCompress, UseCrypto,
+        },
         transfer::{AbstractTransmitter, TransmitterExt},
         AbstractStream, Connection,
     },
@@ -167,29 +171,35 @@ async fn enter_forward_service_main(
             }
         }
     } else {
+        let mux: MuxConfig = MuxConfig::default();
+
+        stream.send_packet(&mux.borrow_encode()?).await?;
+
         for expose in service.exposes.clone() {
             let addr = server.addr.clone();
 
             match expose {
                 Expose::Kcp(_, port) => todo!(),
-                Expose::Tcp(_, port) => connector.add(MuxConnector::new(move |proto| {
-                    let addr = addr.clone();
-                    async move {
-                        addr.try_connect(port, |host, port| async move {
-                            let connection = match host {
-                                Host::Ip(ip) => {
-                                    TcpStream::connect(SocketAddr::new(*ip, port)).await
-                                }
-                                Host::Domain(domain) => {
-                                    TcpStream::connect(format!("{domain}:{port}")).await
-                                }
-                            }?;
+                Expose::Tcp(_, port) => {
+                    connector.add(MuxConnector::new(mux.clone(), move |proto| {
+                        let addr = addr.clone();
+                        async move {
+                            addr.try_connect(port, |host, port| async move {
+                                let connection = match host {
+                                    Host::Ip(ip) => {
+                                        TcpStream::connect(SocketAddr::new(*ip, port)).await
+                                    }
+                                    Host::Domain(domain) => {
+                                        TcpStream::connect(format!("{domain}:{port}")).await
+                                    }
+                                }?;
 
-                            Ok(AbstractStream::new(connection).into())
-                        })
-                        .await
-                    }
-                })),
+                                Ok(AbstractStream::new(connection).into())
+                            })
+                            .await
+                        }
+                    }))
+                }
             }
         }
     }
@@ -225,6 +235,7 @@ async fn enter_forward_service_main(
                         Ok(mut stream) => match linker.link(Protocol::Tcp).await {
                             Ok(mut transmitter) => {
                                 log::debug!("start forwarding ......");
+                                
                             }
                             Err(e) => {
                                 log::debug!("{:?}", e);

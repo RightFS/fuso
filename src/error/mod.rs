@@ -16,9 +16,15 @@ pub enum FusoError {
     InvalidExposeType,
     NotResponse,
     Custom(String),
-    Bincode(bincode::Error),
+    MsgPack(MsgPack),
     TomlDeError(toml::de::Error),
     StdIo(std::io::Error),
+}
+
+#[derive(Debug)]
+pub enum MsgPack{
+    Encode(rmp_serde::encode::Error),
+    Decode(rmp_serde::decode::Error)
 }
 
 impl From<std::io::Error> for FusoError {
@@ -33,9 +39,15 @@ impl From<toml::de::Error> for FusoError {
     }
 }
 
-impl From<bincode::Error> for FusoError {
-    fn from(value: bincode::Error) -> Self {
-        Self::Bincode(value)
+impl From<rmp_serde::encode::Error> for FusoError {
+    fn from(value: rmp_serde::encode::Error) -> Self {
+        Self::MsgPack(MsgPack::Encode(value))
+    }
+}
+
+impl From<rmp_serde::decode::Error> for FusoError {
+    fn from(value: rmp_serde::decode::Error) -> Self {
+        Self::MsgPack(MsgPack::Decode(value))
     }
 }
 

@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use bincode::de;
+
 use fuso::{
     config::{client::WithForwardService, server::Config, Expose, Stateful},
     core::{
@@ -15,10 +15,11 @@ use fuso::{
         net::{KcpListener, TcpListener},
         processor::{IProcessor, Processor, StreamProcessor},
         protocol::{AsyncPacketRead, AsyncPacketSend},
+        rpc::Decoder,
         split::SplitStream,
         stream::{
             fallback::Fallback,
-            handshake::{ClientConfig, ForwardConfig, Handshake},
+            handshake::{ClientConfig, ForwardConfig, Handshake, MuxConfig},
             UseCompress, UseCrypto,
         },
         AbstractStream, Stream,
@@ -195,7 +196,7 @@ pub async fn handle_connection(
     Ok(())
 }
 
-pub async fn enter_forwarder<S>(conf: ForwardConfig, transport: S) -> error::Result<()>
+pub async fn enter_forwarder<S>(conf: ForwardConfig, mut transport: S) -> error::Result<()>
 where
     S: Stream + Send + Unpin + 'static,
 {
@@ -233,7 +234,13 @@ where
         }
     } else {
         accepter.add({
+            
+            log::debug!("using mux accepter");
+
+            let mux: MuxConfig = transport.recv_packet().await?.decode()?;
+
             let mut accepter = MultiAccepter::new();
+
             for expose in conf.exposes.iter() {
                 match expose {
                     Expose::Tcp(ip, port) => {
@@ -249,13 +256,13 @@ where
                 }
             }
 
-            MuxAccepter::new(1110, rand::random(), accepter)
+            MuxAccepter::new(mux, accepter)
         });
     }
 
     let mut forwarder = PortForwarder::new(transport, accepter, (), None);
 
-    log::debug!("forward started ..");
+    log::debug!("port forwarder started .");
 
     loop {
         let (c1, c2) = forwarder.accept().await?;

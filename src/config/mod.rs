@@ -12,7 +12,7 @@ use crate::error;
 pub mod client;
 pub mod server;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 
 pub enum Authentication {
@@ -21,12 +21,12 @@ pub enum Authentication {
     Account(AuthWithAccount),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct AuthWithSecret {
     secret: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct AuthWithAccount {
     username: String,
     password: String,

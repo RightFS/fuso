@@ -10,6 +10,7 @@ use rc4::{KeyInit, Rc4, StreamCipher};
 use super::{Connection, Rc4MagicHandshake, Whence};
 use crate::core::future::Poller;
 use crate::core::io::AsyncReadExt;
+use crate::core::stream::handshake::MuxConfig;
 use crate::core::Stream;
 use crate::core::{accepter::Accepter, AbstractStream};
 use crate::error;
@@ -100,7 +101,7 @@ where
 
         Rc4::new((&handshaker.secret).into())
             .try_apply_keystream(&mut buf)
-            .map(|()| handshaker.expect.eq(&u32::from_be_bytes(buf)))
+            .map(|()| handshaker.expect.eq(&u32::from_le_bytes(buf)))
             .map_or_else(|_| Ok(false), |z| Ok(z))
     }
 }
@@ -110,13 +111,13 @@ impl<R, A> MuxAccepter<R, A>
 where
     A: Accepter<Output = (SocketAddr, AbstractStream<'static>)> + Unpin + Send,
 {
-    pub fn new_runtime(accepter: A, magic: u32, secret: [u8; 16]) -> Self {
+    pub fn new_runtime(accepter: A, conf: MuxConfig) -> Self {
         Self {
             accepter,
             connections: Poller::new(),
             handshaker: Arc::new(Rc4MagicHandshake {
-                secret,
-                expect: magic,
+                expect: conf.magic,
+                secret: conf.secret,
             }),
             _marked: PhantomData,
         }

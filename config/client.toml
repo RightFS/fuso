@@ -20,6 +20,9 @@ compress = ["lz4"]
 target = { type = "tcp", port = 9999, addr = ["127.0.0.1"] }
 keep_alive = { interval = 100 }
 
+[ssh1.prepares.socks5]
+auth = { type = "secret", secret = "1234" }
+
 
 # [executable]
 # type = "forward"

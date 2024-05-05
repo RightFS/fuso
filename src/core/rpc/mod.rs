@@ -6,7 +6,6 @@ mod polling;
 pub mod structs;
 
 use std::{
-    marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -49,6 +48,8 @@ pub trait AsyncCallee {
 
 pub trait Encoder<T> {
     fn encode(self) -> error::Result<Vec<u8>>;
+
+    fn borrow_encode(&self) -> error::Result<Vec<u8>>;
 }
 
 pub trait Decoder<T> {
@@ -61,7 +62,11 @@ where
     T: serde::Serialize,
 {
     fn encode(self) -> error::Result<Vec<u8>> {
-        bincode::serialize(&self).map_err(Into::into)
+        self.borrow_encode()
+    }
+
+    fn borrow_encode(&self) -> error::Result<Vec<u8>> {
+        rmp_serde::to_vec(self).map_err(Into::into)
     }
 }
 
@@ -72,6 +77,6 @@ where
     type Output = T;
 
     fn decode(self) -> error::Result<Self::Output> {
-        bincode::deserialize(&self).map_err(Into::into)
+        rmp_serde::from_slice(&self).map_err(Into::into)
     }
 }

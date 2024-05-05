@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{
-        client::WithForwardService, AuthWithAccount, AuthWithSecret, Authentication, Compress,
+        client::{PrepareForward, WithForwardService}, AuthWithAccount, AuthWithSecret, Authentication, Compress,
         Crypto, Expose,
     },
     core::{
@@ -27,12 +27,19 @@ pub enum ClientConfig {
     Forward(ForwardConfig),
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MuxConfig {
+    pub magic: u32,
+    pub secret: [u8; 16],
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ForwardConfig {
     pub exposes: HashSet<Expose>,
     pub channel: Option<HashSet<Expose>>,
     pub cryptos: HashSet<Crypto>,
     pub compress: HashSet<Compress>,
+    pub prepares: PrepareForward,
 }
 
 impl<T> Handshake for T where T: Stream + Send + Unpin {}
@@ -138,9 +145,20 @@ impl<'a> From<&'a WithForwardService> for ClientConfig {
     fn from(value: &'a WithForwardService) -> Self {
         Self::Forward(ForwardConfig {
             exposes: value.exposes.clone(),
+            prepares: value.prepares.clone(),
             channel: value.channel.clone(),
             cryptos: value.crypto.clone(),
             compress: value.compress.clone(),
         })
+    }
+}
+
+impl Default for MuxConfig {
+    fn default() -> Self {
+        Self {
+            // @MUX
+            magic: 0x404d5558,
+            secret: rand::random(),
+        }
     }
 }

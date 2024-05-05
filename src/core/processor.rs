@@ -39,7 +39,7 @@ pub struct Processor<'a, A, R> {
     processors: Vec<AbstractProcessor<'a, A, R>>,
 }
 
-pub struct WrappedPreprocessor<'a, In, Out>(
+pub struct AbstractPreprocessor<'a, In, Out>(
     pub(crate) Arc<dyn Preprocessor<In, Output = Out> + Sync + Send + 'a>,
 );
 
@@ -47,8 +47,8 @@ impl<A, R> IProcessor<A, R> for AbstractProcessor<'_, A, R>
 where
     A: Send,
 {
-    fn process<'a>(&'a mut self, data: A) -> BoxedFuture<'a, Process<A, R>> {
-        self.0.process(data)
+    fn process<'a>(&'a mut self, input: A) -> BoxedFuture<'a, Process<A, R>> {
+        self.0.process(input)
     }
 }
 
@@ -87,14 +87,14 @@ impl<'a, A, R> Processor<'a, A, R> {
     }
 }
 
-impl<In, Out> Preprocessor<In> for WrappedPreprocessor<'_, In, Out> {
+impl<In, Out> Preprocessor<In> for AbstractPreprocessor<'_, In, Out> {
     type Output = Out;
     fn prepare<'a>(&'a self, input: In) -> BoxedFuture<'a, Self::Output> {
         self.0.prepare(input)
     }
 }
 
-impl<In, Out> Clone for WrappedPreprocessor<'_, In, Out> {
+impl<In, Out> Clone for AbstractPreprocessor<'_, In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }

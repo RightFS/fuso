@@ -91,6 +91,23 @@ pub struct WithForwardService {
     /// 压缩方式
     #[serde(default = "Default::default")]
     pub compress: HashSet<Compress>,
+    /// 访问端建立连接后的前置处理方式
+    #[serde(default = "Default::default")]
+    pub prepares: PrepareForward,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub struct PrepareForward {
+    socks5: Option<WithSocks5Prepare>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub struct WithSocks5Prepare {
+    /// 认证方式
+    auth: Authentication,
+    /// 是否启动udp转发
+    #[serde(default = "default_socks5_udp_forward")]
+    udp_forward: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -285,6 +302,10 @@ fn default_exposes() -> HashSet<Expose> {
     exposes.insert(Expose::Tcp(super::IP::V4, 0));
 
     exposes
+}
+
+fn default_socks5_udp_forward() -> bool {
+    true
 }
 
 #[cfg(test)]
