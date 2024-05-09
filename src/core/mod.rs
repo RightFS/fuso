@@ -10,6 +10,7 @@ use self::io::{AsyncRead, AsyncWrite};
 
 pub mod accepter;
 pub mod channel;
+pub mod connection;
 pub mod connector;
 pub mod future;
 pub mod handshake;
@@ -23,7 +24,6 @@ pub mod stream;
 pub mod task;
 pub mod token;
 pub mod transfer;
-pub mod connection;
 
 pub type BoxedFuture<'a, O> = Pin<Box<dyn Future<Output = O> + Send + 'a>>;
 
@@ -152,23 +152,25 @@ impl<'a> AsyncRead for Connection<'a> {
         cx: &mut std::task::Context<'_>,
         buf: &mut [u8],
     ) -> std::task::Poll<crate::error::Result<usize>> {
-        if let Some(cursor) = self.cursor.as_mut() {
-            let n = cursor.read(buf)?;
-            if n > 0 {
-                return Poll::Ready(Ok(n));
+        let n = match self.cursor.as_mut() {
+            None => 0,
+            Some(cursor) => cursor.read(buf)?,
+        };
+
+        let n = if n <= 0 {
+            match Pin::new(&mut self.stream).poll_read(cx, buf)? {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(n) => n,
             }
+        } else {
+            n
+        };
+
+        if let Some(marked) = self.marked.as_mut() {
+            marked.write_all(&buf[..n])?;
         }
 
-        match Pin::new(&mut self.stream).poll_read(cx, buf)? {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(n) => {
-                if let Some(marked) = self.marked.as_mut() {
-                    marked.write_all(&buf[..n])?;
-                }
-
-                Poll::Ready(Ok(n))
-            }
-        }
+        Poll::Ready(Ok(n))
     }
 }
 

@@ -1,12 +1,15 @@
 use std::{
     io,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
-use crate::error;
+use parking_lot::Mutex;
 
-use super::Stream;
+use crate::{core::future::Select, error};
+
+use super::{BoxedFuture, Stream};
 
 #[pin_project::pin_project]
 pub struct TransmitSend<'t, T> {
@@ -28,6 +31,14 @@ pub struct TransmitRecv<'t, T> {
     buf: &'t mut [u8],
     #[pin]
     transmitter: &'t mut T,
+}
+
+pub struct TransmiterWriter<T> {
+    transmiter: Arc<Mutex<T>>,
+}
+
+pub struct TransmitterReader<T> {
+    transmiter: Arc<Mutex<T>>,
 }
 
 pub trait Transmitter: Unpin {
@@ -74,6 +85,36 @@ pub trait TransmitterExt: Transmitter {
             data,
             transmitter: self,
         }
+    }
+
+    fn split(self) -> (TransmiterWriter<Self>, TransmitterReader<Self>)
+    where
+        Self: Sized,
+    {
+        let this = Arc::new(Mutex::new(self));
+
+        (
+            TransmiterWriter {
+                transmiter: this.clone(),
+            },
+            TransmitterReader { transmiter: this },
+        )
+    }
+
+    fn transfer<'a, T>(self, to: T) -> Select<'a, error::Result<()>>
+    where
+        T: Transmitter + Send + 'a,
+        Self: Sized + Send + 'a,
+    {
+        let (s1_writer, s1_reader) = to.split();
+        let (s2_writer, s2_reader) = self.split();
+        
+        let mut select = Select::new();
+
+        select.add(crate::core::io::copy(s1_writer, s2_reader));
+        select.add(crate::core::io::copy(s2_writer, s1_reader));
+
+        select
     }
 }
 
@@ -179,5 +220,37 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
         Pin::new(&mut **this.transmitter).poll_recv(cx, this.buf)
+    }
+}
+
+impl<T> crate::core::AsyncRead for TransmitterReader<T>
+where
+    T: Transmitter + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<error::Result<usize>> {
+        let mut this = self.transmiter.lock();
+        Pin::new(&mut *this).poll_recv(cx, buf)
+    }
+}
+
+impl<T> crate::core::AsyncWrite for TransmiterWriter<T>
+where
+    T: Transmitter + Unpin,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<error::Result<usize>> {
+        let mut this = self.transmiter.lock();
+        Pin::new(&mut *this).poll_send(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<error::Result<()>> {
+        Poll::Ready(Ok(()))
     }
 }

@@ -5,6 +5,7 @@ use self::{compress::CompressedStream, crypto::EncryptedStream};
 use super::io::{AsyncRead, AsyncWrite};
 
 pub mod codec;
+pub mod virio;
 pub mod compress;
 pub mod crypto;
 pub mod fallback;

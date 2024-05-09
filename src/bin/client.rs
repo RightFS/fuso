@@ -13,7 +13,7 @@ use fuso::{
     core::{
         accepter::AccepterExt,
         connector::MultiConnector,
-        io::{AsyncReadExt, AsyncWriteExt, StreamExt},
+        io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
         protocol::{AsyncPacketRead, AsyncPacketSend},
         rpc::{AsyncCall, Caller, Encoder},
@@ -214,7 +214,17 @@ async fn enter_forward_service_main(
             log::debug!("target {:?}", target);
 
             match target {
-                FinalTarget::Udp { addr, port } => todo!(),
+                FinalTarget::Udp { addr, port } => {
+                    let mut a = linker.link(Protocol::Tcp).await.unwrap();
+
+                    let mut buf = [0u8; 1024];
+
+                    let n = a.recv(&mut buf).await.unwrap();
+
+
+                    log::debug!("{:?}", &buf[..n]);
+
+                }
                 FinalTarget::Shell { path, args } => todo!(),
                 FinalTarget::Dynamic => todo!(),
                 FinalTarget::Tcp { addr, port } => {
@@ -232,10 +242,9 @@ async fn enter_forward_service_main(
                         .await;
 
                     match result {
-                        Ok(mut stream) => match linker.link(Protocol::Tcp).await {
-                            Ok(mut transmitter) => {
-                                log::debug!("start forwarding ......");
-                                
+                        Ok(stream) => match linker.link(Protocol::Tcp).await {
+                            Ok(transmitter) => {
+                                transmitter.transfer(stream).await;
                             }
                             Err(e) => {
                                 log::debug!("{:?}", e);
@@ -323,7 +332,7 @@ async fn enter_bridge_service_main(
 
             match result {
                 Ok(upstream) => {
-                    upstream.copy(&mut stream).await;
+                    upstream.transfer(stream).await;
                 }
                 Err(e) => {}
             };

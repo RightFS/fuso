@@ -66,7 +66,7 @@ where
     }
 
     fn borrow_encode(&self) -> error::Result<Vec<u8>> {
-        rmp_serde::to_vec(self).map_err(Into::into)
+        rmp_serde::to_vec_named(self).map_err(Into::into)
     }
 }
 

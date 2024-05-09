@@ -22,10 +22,12 @@ pub enum FusoError {
 }
 
 #[derive(Debug)]
-pub enum MsgPack{
+pub enum MsgPack {
     Encode(rmp_serde::encode::Error),
-    Decode(rmp_serde::decode::Error)
+    Decode(rmp_serde::decode::Error),
 }
+
+impl std::error::Error for FusoError {}
 
 impl From<std::io::Error> for FusoError {
     fn from(value: std::io::Error) -> Self {
@@ -54,6 +56,15 @@ impl From<rmp_serde::decode::Error> for FusoError {
 impl From<String> for FusoError {
     fn from(value: String) -> Self {
         Self::Custom(value)
+    }
+}
+
+impl From<FusoError> for std::io::Error {
+    fn from(value: FusoError) -> Self {
+        match value {
+            FusoError::StdIo(io) => io,
+            value => std::io::Error::new(std::io::ErrorKind::Other, value),
+        }
     }
 }
 

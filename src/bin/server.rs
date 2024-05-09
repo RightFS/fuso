@@ -4,14 +4,13 @@ use std::{
     time::Duration,
 };
 
-
 use fuso::{
     config::{client::WithForwardService, server::Config, Expose, Stateful},
     core::{
         accepter::{AccepterExt, MultiAccepter, StreamAccepter, TaggedAccepter},
         future::Select,
         handshake::Handshaker,
-        io::{AsyncReadExt, AsyncWriteExt, StreamExt},
+        io::{AsyncReadExt, AsyncWriteExt},
         net::{KcpListener, TcpListener},
         processor::{IProcessor, Processor, StreamProcessor},
         protocol::{AsyncPacketRead, AsyncPacketSend},
@@ -22,11 +21,12 @@ use fuso::{
             handshake::{ClientConfig, ForwardConfig, Handshake, MuxConfig},
             UseCompress, UseCrypto,
         },
+        transfer::TransmitterExt,
         AbstractStream, Stream,
     },
     error,
-    runtime::tokio::TokioRuntime,
-    server::port_forward::{ForwardAccepter, MuxAccepter, PortForwarder},
+    runtime::tokio::{UdpWithTokioRuntime, TokioRuntime, TokioUdpSocket},
+    server::port_forward::{ForwardAccepter, MuxAccepter, PortForwarder, Socks5Preprocessor},
 };
 use kcp_rust::KcpConfig;
 
@@ -234,7 +234,6 @@ where
         }
     } else {
         accepter.add({
-            
             log::debug!("using mux accepter");
 
             let mux: MuxConfig = transport.recv_packet().await?.decode()?;
@@ -260,7 +259,9 @@ where
         });
     }
 
-    let mut forwarder = PortForwarder::new(transport, accepter, (), None);
+    let previs = Socks5Preprocessor::<UdpWithTokioRuntime>::new();
+
+    let mut forwarder = PortForwarder::new(transport, accepter, previs, None);
 
     log::debug!("port forwarder started .");
 

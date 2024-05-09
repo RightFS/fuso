@@ -42,7 +42,7 @@ impl KcpListener {
         P: KcpProvider,
         A: Into<SocketAddr>,
     {
-        let udp = UdpSocket::bind::<P, _>(addr).await?;
+        let (_, udp) = UdpSocket::bind::<P, _>(addr).await?;
 
         let listener = kcp_rust::KcpListener::new::<P::Runtime>(udp, conf)?;
 

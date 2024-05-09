@@ -3,6 +3,7 @@ use std::{
     fmt::Display,
     io,
     net::{IpAddr, Ipv4Addr},
+    str::FromStr,
 };
 
 use crate::error;
@@ -50,11 +51,15 @@ pub struct Server {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ServerAddr {
-    WithIpAddr(Vec<IpAddr>),
-    WithDomain(Vec<String>),
+#[serde(into = "String")]
+#[serde(try_from = "String")]
+pub enum Addr {
+    WithIpAddr(IpAddr),
+    WithDomain(String),
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ServerAddr(pub Vec<Addr>);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -205,16 +210,14 @@ impl ServerAddr {
         F: Fn(Host<'a>, u16) -> Fut + 'a,
         Fut: std::future::Future<Output = error::Result<O>> + 'a,
     {
-        match self {
-            ServerAddr::WithIpAddr(addrs) => {
-                for ip in addrs {
+        for addr in self.0.iter() {
+            match addr {
+                Addr::WithIpAddr(ip) => {
                     if let Ok(output) = f(Host::Ip(ip), port).await {
                         return Ok(output);
                     }
                 }
-            }
-            ServerAddr::WithDomain(domains) => {
-                for domain in domains {
+                Addr::WithDomain(domain) => {
                     if let Ok(output) = f(Host::Domain(domain), port).await {
                         return Ok(output);
                     }
@@ -250,7 +253,9 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             server: Server {
-                addr: ServerAddr::WithIpAddr(vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]),
+                addr: ServerAddr(vec![Addr::WithIpAddr(IpAddr::V4(Ipv4Addr::new(
+                    127, 0, 0, 1,
+                )))]),
                 ports: vec![6528],
                 retries: -1, // always
                 crypto: Default::default(),
@@ -295,6 +300,24 @@ impl Config {
     }
 }
 
+impl From<String> for Addr {
+    fn from(value: String) -> Self {
+        match IpAddr::from_str(&value) {
+            Ok(ip) => Self::WithIpAddr(ip),
+            Err(_) => Self::WithDomain(value),
+        }
+    }
+}
+
+impl From<Addr> for String {
+    fn from(value: Addr) -> Self {
+        match value {
+            Addr::WithIpAddr(ip) => ip.to_string(),
+            Addr::WithDomain(domain) => domain,
+        }
+    }
+}
+
 /// 默认随机分配一个端口
 fn default_exposes() -> HashSet<Expose> {
     let mut exposes = HashSet::new();
@@ -309,8 +332,10 @@ fn default_socks5_udp_forward() -> bool {
 }
 
 #[cfg(test)]
-#[cfg(feature = "fuso-toml")]
+// #[cfg(feature = "fuso-toml")]
 mod tests {
+
+    use crate::core::rpc::{Decoder, Encoder};
 
     use super::Config;
 
@@ -329,5 +354,11 @@ mod tests {
         println!("{:#?}", a);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_serialize(){
+        let a = super::Config::default();
+        let a: super::Config = a.encode().unwrap().decode().unwrap();
     }
 }

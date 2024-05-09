@@ -75,41 +75,23 @@ pub trait AsyncWriteExt: AsyncWrite + Unpin {
     }
 }
 
-pub trait StreamExt {
-    fn transfer<'a, T>(self, to: T) -> BoxedFuture<'a, error::Result<()>>
-    where
-        T: AsyncRead + AsyncWrite + Unpin + Send + 'a,
-        Self: Sized + Stream + Unpin + Send + 'a,
-    {
-        Box::pin(async move {
-            let (reader_2, writer_2) = to.split();
-            let (reader_1, writer_1) = self.split();
-            select![reader_1.copy(writer_2), reader_2.copy(writer_1)]
-        })
-    }
+pub async fn copy<'a, W, R>(mut writer: W, mut reader: R) -> error::Result<()>
+where
+    W: AsyncWrite + Unpin + Send + 'a,
+    R: AsyncRead + Unpin + Send + Sized + 'a,
+{
+    let mut buf = [0u8; 2048];
 
-    fn copy<'a, T>(mut self, mut to: T) -> BoxedFuture<'a, error::Result<()>>
-    where
-        T: AsyncWrite + Unpin + Send + 'a,
-        Self: AsyncRead + Unpin + Send + Sized + 'a,
-    {
-        Box::pin(async move {
-            let mut buf = [0u8; 2048];
+    loop {
+        let n = reader.read(&mut buf).await?;
 
-            loop {
-                let n = self.read(&mut buf).await?;
+        if n == 0 {
+            break Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
+        }
 
-                if n == 0 {
-                    break Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
-                }
-
-                to.write_all(&buf[..n]).await?;
-            }
-        })
+        writer.write_all(&buf[..n]).await?;
     }
 }
-
-impl<T> StreamExt for T {}
 
 #[pin_project::pin_project]
 pub struct Read<'a, R> {

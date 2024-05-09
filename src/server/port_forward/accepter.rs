@@ -57,7 +57,7 @@ where
                         connection.mark();
 
                         let r = R::wait_for(
-                            std::time::Duration::from_secs(10),
+                            std::time::Duration::from_millis(1000),
                             Self::try_handshake(handshaker, &mut connection),
                         )
                         .await;

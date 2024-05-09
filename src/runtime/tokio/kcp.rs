@@ -12,10 +12,9 @@ use crate::{
     runtime::Runtime,
 };
 
-pub struct KcpWithTokioRuntime;
+pub struct UdpWithTokioRuntime;
 
 pub struct TokioUdpSocket(Arc<tokio::net::UdpSocket>);
-
 
 #[cfg(feature = "fuso-rt-tokio")]
 impl KcpListener {
@@ -23,8 +22,8 @@ impl KcpListener {
     where
         A: Into<SocketAddr>,
     {
-        let udp = crate::core::net::UdpSocket::bind::<KcpWithTokioRuntime, _>(addr).await?;
-        let listener = kcp_rust::KcpListener::new::<KcpWithTokioRuntime>(udp, conf)?;
+        let (_, udp) = crate::core::net::UdpSocket::bind::<UdpWithTokioRuntime, _>(addr).await?;
+        let listener = kcp_rust::KcpListener::new::<UdpWithTokioRuntime>(udp, conf)?;
         Ok(Self {
             inner: Arc::new(listener),
             stored: LazyFuture::new(),
@@ -32,29 +31,32 @@ impl KcpListener {
     }
 }
 
-
-impl crate::core::net::UdpProvider for KcpWithTokioRuntime {
+impl crate::core::net::UdpProvider for UdpWithTokioRuntime {
     type Binder = Self;
 
     type Connect = Self;
 }
 
-impl crate::core::Provider<BoxedFuture<'static, error::Result<AbstractDatagram<'static>>>>
-    for KcpWithTokioRuntime
+impl
+    crate::core::Provider<
+        BoxedFuture<'static, error::Result<(SocketAddr, AbstractDatagram<'static>)>>,
+    > for UdpWithTokioRuntime
 {
     type Arg = SocketAddr;
 
-    fn call(addr: Self::Arg) -> BoxedFuture<'static, error::Result<AbstractDatagram<'static>>> {
+    fn call(
+        addr: Self::Arg,
+    ) -> BoxedFuture<'static, error::Result<(SocketAddr, AbstractDatagram<'static>)>> {
         Box::pin(async move {
-            let boxed: AbstractDatagram<'_> = Box::new(TokioUdpSocket(Arc::new({
-                tokio::net::UdpSocket::bind(addr).await?
-            })));
-            Ok(boxed)
+            let udp = tokio::net::UdpSocket::bind(addr).await?;
+            let addr = udp.local_addr()?;
+            let boxed: AbstractDatagram<'_> = Box::new(TokioUdpSocket(Arc::new(udp)));
+            Ok((addr, boxed))
         })
     }
 }
 
-impl kcp_rust::KcpRuntime for KcpWithTokioRuntime {
+impl kcp_rust::KcpRuntime for UdpWithTokioRuntime {
     type Err = error::FusoError;
 
     type Runner = Self;
@@ -66,20 +68,20 @@ impl kcp_rust::KcpRuntime for KcpWithTokioRuntime {
     }
 }
 
-impl kcp_rust::Runner for KcpWithTokioRuntime {
+impl kcp_rust::Runner for UdpWithTokioRuntime {
     type Err = error::FusoError;
 
     fn start(process: kcp_rust::Background) -> std::result::Result<(), Self::Err> {
-        crate::runtime::tokio::TokioRuntime::spawn(async move{
-          if let Err(e) = process.await {
-              log::warn!("{:?}", e);
-          }
+        crate::runtime::tokio::TokioRuntime::spawn(async move {
+            if let Err(e) = process.await {
+                log::warn!("{:?}", e);
+            }
         });
         Ok(())
     }
 }
 
-impl kcp_rust::Timer for KcpWithTokioRuntime {
+impl kcp_rust::Timer for UdpWithTokioRuntime {
     type Ret = ();
 
     type Output = BoxedFuture<'static, Self::Ret>;
