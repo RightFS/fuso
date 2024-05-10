@@ -8,11 +8,11 @@ use fuso::{
     config::{client::WithForwardService, server::Config, Expose, Stateful},
     core::{
         accepter::{AccepterExt, MultiAccepter, StreamAccepter, TaggedAccepter},
-        future::Select,
+        future::{Poller, Select},
         handshake::Handshaker,
         io::{AsyncReadExt, AsyncWriteExt},
-        net::{KcpListener, TcpListener},
-        processor::{IProcessor, Processor, StreamProcessor},
+        net::{KcpListener, TcpListener, UdpSendTo, UdpSocket},
+        processor::{IProcessor, PreprocessorSelector, Processor, StreamProcessor},
         protocol::{AsyncPacketRead, AsyncPacketSend},
         rpc::Decoder,
         split::SplitStream,
@@ -25,8 +25,11 @@ use fuso::{
         AbstractStream, Stream,
     },
     error,
-    runtime::tokio::{UdpWithTokioRuntime, TokioRuntime, TokioUdpSocket},
-    server::port_forward::{ForwardAccepter, MuxAccepter, PortForwarder, Socks5Preprocessor},
+    runtime::tokio::{TokioRuntime, TokioUdpSocket, UdpWithTokioRuntime},
+    server::{
+        port_forward::{ForwardAccepter, MuxAccepter, PortForwarder, Socks5Preprocessor},
+        udp_forward::UdpForwarderImpl,
+    },
 };
 use kcp_rust::KcpConfig;
 
@@ -50,6 +53,7 @@ async fn enter_fuso_main(conf: Config) -> error::Result<()> {
     //   conf.listens.len()
     env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
+        .filter_module("fuso_socks", log::LevelFilter::Error)
         .init();
 
     enter_fuso_serve(Stateful::new(conf)).await?;
@@ -259,19 +263,41 @@ where
         });
     }
 
-    let previs = Socks5Preprocessor::<UdpWithTokioRuntime>::new();
+    let mut poller = Poller::new();
+    let mut previs = PreprocessorSelector::new();
+
+    if let Some(ref socks5) = conf.prepares.socks5 {
+        previs.add({
+            if let Some(ref udp) = socks5.udp {
+                let (addr, udp) =
+                    UdpSocket::bind::<UdpWithTokioRuntime, _>((udp.bind, udp.port)).await?;
+                let (task, forwarder) = UdpForwarderImpl::new(addr, udp);
+                poller.add(task);
+                Socks5Preprocessor::new(forwarder)
+            } else {
+                Socks5Preprocessor::new(())
+            }
+        })
+    }
 
     let mut forwarder = PortForwarder::new(transport, accepter, previs, None);
 
     log::debug!("port forwarder started .");
 
-    loop {
-        let (c1, c2) = forwarder.accept().await?;
-        log::debug!("start forward ................");
-        tokio::spawn(async move {
-            if let Err(e) = c1.transfer(c2).await {
-                log::warn!("{e}")
-            };
-        });
-    }
+    poller.add(async move {
+        loop {
+            let (c1, c2) = forwarder.accept().await?;
+
+            log::debug!("start forward {} -> {}", c1.addr(), c2.addr());
+
+            tokio::spawn(async move {
+                
+                let _ = c1.transfer(c2).await;
+
+               
+            });
+        }
+    });
+
+    poller.await
 }

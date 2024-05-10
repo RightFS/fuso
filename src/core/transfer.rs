@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 
 use crate::{core::future::Select, error};
 
-use super::{BoxedFuture, Stream};
+use super::Stream;
 
 #[pin_project::pin_project]
 pub struct TransmitSend<'t, T> {
@@ -33,12 +33,12 @@ pub struct TransmitRecv<'t, T> {
     transmitter: &'t mut T,
 }
 
-pub struct TransmiterWriter<T> {
-    transmiter: Arc<Mutex<T>>,
+pub struct TransmitWriter<T> {
+    transmitter: Arc<Mutex<T>>,
 }
 
 pub struct TransmitterReader<T> {
-    transmiter: Arc<Mutex<T>>,
+    transmitter: Arc<Mutex<T>>,
 }
 
 pub trait Transmitter: Unpin {
@@ -87,17 +87,17 @@ pub trait TransmitterExt: Transmitter {
         }
     }
 
-    fn split(self) -> (TransmiterWriter<Self>, TransmitterReader<Self>)
+    fn split(self) -> (TransmitWriter<Self>, TransmitterReader<Self>)
     where
         Self: Sized,
     {
         let this = Arc::new(Mutex::new(self));
 
         (
-            TransmiterWriter {
-                transmiter: this.clone(),
+            TransmitWriter {
+                transmitter: this.clone(),
             },
-            TransmitterReader { transmiter: this },
+            TransmitterReader { transmitter: this },
         )
     }
 
@@ -108,7 +108,7 @@ pub trait TransmitterExt: Transmitter {
     {
         let (s1_writer, s1_reader) = to.split();
         let (s2_writer, s2_reader) = self.split();
-        
+
         let mut select = Select::new();
 
         select.add(crate::core::io::copy(s1_writer, s2_reader));
@@ -232,12 +232,12 @@ where
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<error::Result<usize>> {
-        let mut this = self.transmiter.lock();
+        let mut this = self.transmitter.lock();
         Pin::new(&mut *this).poll_recv(cx, buf)
     }
 }
 
-impl<T> crate::core::AsyncWrite for TransmiterWriter<T>
+impl<T> crate::core::AsyncWrite for TransmitWriter<T>
 where
     T: Transmitter + Unpin,
 {
@@ -246,11 +246,27 @@ where
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<error::Result<usize>> {
-        let mut this = self.transmiter.lock();
+        let mut this = self.transmitter.lock();
         Pin::new(&mut *this).poll_send(cx, buf)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<error::Result<()>> {
         Poll::Ready(Ok(()))
+    }
+}
+
+impl<T> Clone for TransmitterReader<T> {
+    fn clone(&self) -> Self {
+        Self {
+            transmitter: self.transmitter.clone(),
+        }
+    }
+}
+
+impl<T> Clone for TransmitWriter<T> {
+    fn clone(&self) -> Self {
+        Self {
+            transmitter: self.transmitter.clone(),
+        }
     }
 }

@@ -1,4 +1,5 @@
 mod accepter;
+mod connection;
 mod handshake;
 mod preprocessor;
 mod transport;
@@ -15,7 +16,7 @@ use std::{collections::HashMap, pin::Pin, sync::Arc, task::Poll};
 
 use crate::core::future::{Poller, Select};
 use crate::core::io::AsyncReadExt;
-use crate::core::rpc::structs::port_forward::{self};
+use crate::core::rpc::structs::port_forward::{self, Target};
 use crate::core::rpc::AsyncCall;
 use crate::core::task::{setter, Getter, Setter};
 use crate::core::token::IncToken;
@@ -25,13 +26,15 @@ use crate::{
     core::{
         accepter::Accepter,
         io::{AsyncRead, AsyncWrite},
-        processor::{Preprocessor, AbstractPreprocessor},
+        processor::{AbstractPreprocessor, Preprocessor},
         rpc::structs::port_forward::{Request, VisitorProtocol},
     },
     error,
 };
 
 use transport::Transport;
+
+use self::connection::UdpConnections;
 
 type Connection = crate::core::Connection<'static>;
 
@@ -40,8 +43,22 @@ enum Outcome {
     Mapped(u64),
     Pending(u64, Getter<()>),
     Timeout(u64),
+    Complete(Connection, Connection),
     Transport(u64, error::FusoError),
     Stopped(Option<error::FusoError>),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConnKind {
+    Udp,
+    Tcp,
+}
+
+struct StashedConn {
+    kind: ConnKind,
+    conn: Connection,
+    #[allow(unused)]
+    guard: Setter<()>,
 }
 
 pub enum Whence {
@@ -52,11 +69,12 @@ pub enum Whence {
 #[derive(Clone)]
 pub struct Visitors {
     inc_token: IncToken,
-    connections: Arc<Mutex<HashMap<u64, (Connection, Setter<()>)>>>,
+    connections: Arc<Mutex<HashMap<u64, StashedConn>>>,
 }
 
 pub struct PortForwarder<Runtime, A, T> {
     poller: Poller<'static, error::Result<Outcome>>,
+    uconns: UdpConnections<Runtime>,
     accepter: A,
     visitors: Visitors,
     transport: Transport<T>,
@@ -69,7 +87,7 @@ impl<R, A, T> Accepter for PortForwarder<R, A, T>
 where
     A: Accepter<Output = Whence> + Unpin + 'static,
     T: Stream + Unpin + Send + 'static,
-    R: Runtime + Unpin + 'static,
+    R: Runtime + Sync + Send + Unpin + 'static,
 {
     type Output = (Connection, Connection);
 
@@ -90,6 +108,7 @@ where
                 Some(Whence::Visitor(conn)) => {
                     let fut = Self::do_prepare_visitor(
                         conn,
+                        self.uconns.clone(),
                         self.visitors.clone(),
                         self.transport.clone(),
                         self.prepvis.clone(),
@@ -102,6 +121,8 @@ where
                 Some(Whence::Mapping(conn)) => {
                     let fut = Self::do_prepare_mapping(
                         conn,
+                        self.uconns.clone(),
+                        self.visitors.clone(),
                         self.transport.clone(),
                         self.prepmap.clone(),
                     );
@@ -121,6 +142,10 @@ where
                 }
             };
 
+            if let Poll::Ready(()) = Pin::new(&mut self.uconns).poll(ctx)? {
+                return Poll::Ready(Err(error::FusoError::Abort));
+            }
+
             polled = need_poll;
 
             match outcome {
@@ -132,6 +157,9 @@ where
                         log::debug!("mapping error {{ token={token} }}")
                     }
                 },
+                Outcome::Complete(conn, trans) => {
+                    return Poll::Ready(Ok((conn, trans)));
+                }
                 Outcome::Pending(token, getter) => {
                     if self.visitors.exists(token) {
                         self.poller.add(Self::wait_transport(
@@ -190,8 +218,7 @@ where
 {
     pub fn new_with_runtime<P, M>(transport: T, accepter: A, prepvis: P, prepmap: M) -> Self
     where
-        P: Preprocessor<Connection, Output = error::Result<VisitorProtocol>>,
-        P: Send + Sync + 'static,
+        P: Into<AbstractPreprocessor<'static, Connection, error::Result<VisitorProtocol>>>,
         M: Preprocessor<Connection, Output = error::Result<Connection>>,
         M: Send + Sync + 'static,
     {
@@ -206,12 +233,15 @@ where
             }
         });
 
+        let uconns = UdpConnections::default();
+
         Self {
             poller,
+            uconns,
             accepter,
             transport,
             visitors: Default::default(),
-            prepvis: AbstractPreprocessor(Arc::new(prepvis)),
+            prepvis: prepvis.into(),
             prepmap: AbstractPreprocessor(Arc::new(prepmap)),
             _marked: PhantomData,
         }
@@ -247,33 +277,54 @@ where
 
     async fn do_prepare_visitor(
         conn: Connection,
+        uconns: UdpConnections<R>,
         visitors: Visitors,
         transport: Transport<T>,
         preprocessor: AbstractPreprocessor<'_, Connection, error::Result<VisitorProtocol>>,
     ) -> error::Result<Outcome> {
+        let mut conn_kind = ConnKind::Tcp;
+        let mut udp_forward = false;
         let mut transport = transport;
 
         let (conn, addr) = match preprocessor.prepare(conn).await? {
-            VisitorProtocol::Socks(conn, socks) => (conn, Some(socks)),
+            VisitorProtocol::Socks(conn, target) => (conn, Some(target)),
             VisitorProtocol::Other(conn, addr) => match addr {
                 None => (conn, None),
                 Some(target) => (conn, Some(target)),
             },
         };
 
-        log::debug!("create mapping {} -- [T] -- {:?}", conn.addr(), addr);
+        if let Some(target) = addr.as_ref() {
+            if let Target::Udp(_, _) = target {
+                conn_kind = ConnKind::Udp;
+                udp_forward = true;
+            }
+        }
+
+        if udp_forward {
+            if let Some(transport) = uconns.apply_idle_conn().await? {
+                return Ok(Outcome::Complete(conn, transport));
+            }
+        }
+
+        log::trace!("create mapping {} -- [T] -- {:?}", conn.addr(), addr);
 
         let (setter, getter) = setter();
 
-        let token = visitors.store(conn, setter);
+        let token = visitors.store(conn_kind, conn, setter);
+
+        let request = match udp_forward {
+            true => Request::Dyn(token, addr),
+            false => Request::New(token, addr),
+        };
 
         let result = R::wait_for(std::time::Duration::from_secs(10), async move {
-            match transport.call(Request::New(token, addr)).await {
+            match transport.call(request).await {
                 Err(e) => Err(e),
                 Ok(resp) => match resp {
                     port_forward::Response::Ok => Ok(()),
-                    port_forward::Response::Cancel => Err(error::FusoError::Cancel),
                     port_forward::Response::Error(msg) => Err(msg.into()),
+                    port_forward::Response::Cancel => Err(error::FusoError::Cancel),
                 },
             }
         })
@@ -290,6 +341,8 @@ where
 
     async fn do_prepare_mapping(
         conn: Connection,
+        uconns: UdpConnections<R>,
+        visitors: Visitors,
         _: Transport<T>,
         preprocessor: AbstractPreprocessor<'_, Connection, error::Result<Connection>>,
     ) -> error::Result<Outcome> {
@@ -301,7 +354,11 @@ where
 
         let token = u64::from_be_bytes(buf);
 
-        log::debug!("created mapping {{ token={token} }}");
+        if let Some(ConnKind::Udp) = visitors.kind(token) {
+            conn = uconns.exchange(conn).await?;
+        };
+
+        log::trace!("created mapping {{ token={token} }}");
 
         Ok(Outcome::Ready(token, conn))
     }
@@ -322,13 +379,19 @@ impl Visitors {
     }
 
     fn take(&self, token: u64) -> Option<Connection> {
-        self.connections.lock().remove(&token).map(|(c, _)| c)
+        self.connections.lock().remove(&token).map(|sc| sc.conn)
     }
 
-    fn store(&self, conn: Connection, setter: Setter<()>) -> u64 {
+    fn kind(&self, token: u64) -> Option<ConnKind> {
+        self.connections.lock().get(&token).map(|sc| sc.kind)
+    }
+
+    fn store(&self, kind: ConnKind, conn: Connection, guard: Setter<()>) -> u64 {
         let token = self.next_token();
 
-        self.connections.lock().insert(token, (conn, setter));
+        self.connections
+            .lock()
+            .insert(token, StashedConn { kind, conn, guard });
 
         token
     }

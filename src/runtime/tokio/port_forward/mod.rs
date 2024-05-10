@@ -1,9 +1,19 @@
 use std::net::SocketAddr;
 
 use crate::{
-    client::port_forward::Protocol, config::client::FinalTarget, core::{
-        accepter::Accepter, connector::Connector, processor::Preprocessor, rpc::structs::port_forward::VisitorProtocol, stream::handshake::MuxConfig, transfer::AbstractTransmitter, AbstractStream, Connection, Stream
-    }, error, server::port_forward::{MuxAccepter, Whence}
+    client::port_forward::Protocol,
+    config::client::FinalTarget,
+    core::{
+        accepter::Accepter,
+        connector::Connector,
+        processor::{AbstractPreprocessor, Preprocessor},
+        rpc::structs::port_forward::VisitorProtocol,
+        stream::handshake::MuxConfig,
+        transfer::AbstractTransmitter,
+        AbstractStream, Connection, Stream,
+    },
+    error,
+    server::port_forward::{MuxAccepter, Whence},
 };
 
 use super::TokioRuntime;
@@ -24,8 +34,7 @@ where
 {
     pub fn new<P, M>(transport: T, accepter: A, prepvis: P, prepmap: M) -> Self
     where
-        P: Preprocessor<Connection<'static>, Output = error::Result<VisitorProtocol>>,
-        P: Send + Sync + 'static,
+        P: Into<AbstractPreprocessor<'static, Connection<'static>, error::Result<VisitorProtocol>>>,
         M: Preprocessor<Connection<'static>, Output = error::Result<Connection<'static>>>,
         M: Send + Sync + 'static,
     {
@@ -39,7 +48,11 @@ where
 {
     pub fn new<C>(transport: S, target: FinalTarget, connector: C) -> Self
     where
-        C: Connector<Protocol, Output = AbstractTransmitter<'static>> + Sync + Send + Unpin + 'static,
+        C: Connector<Protocol, Output = AbstractTransmitter<'static>>
+            + Sync
+            + Send
+            + Unpin
+            + 'static,
     {
         Self::new_with_runtime(transport, target, connector)
     }

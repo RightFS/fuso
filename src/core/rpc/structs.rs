@@ -12,6 +12,7 @@ pub mod port_forward {
     #[derive(Debug, Serialize, Deserialize)]
     pub enum Request {
         New(u64, Option<Target>),
+        Dyn(u64, Option<Target>)
     }
 
     #[derive(Debug, Serialize, Deserialize)]

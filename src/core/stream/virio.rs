@@ -1,6 +1,5 @@
 use std::{
     collections::VecDeque,
-    io::Read,
     pin::Pin,
     sync::Arc,
     task::{Poll, Waker},
@@ -88,17 +87,18 @@ impl AsyncRead for VirBuf {
         cx: &mut std::task::Context<'_>,
         buf: &mut [u8],
     ) -> std::task::Poll<crate::error::Result<usize>> {
-        let mut ct = self.container.lock();
-        if ct.total == 0 {
+        let n = { self.container.lock().read(buf)? };
+
+        let r = if n == 0 {
             self.read_waker.lock().replace(cx.waker().clone());
             Poll::Pending
         } else {
-            let n = ct.fill(buf)?;
-            ct.total -= n;
-            drop(ct);
-            self.try_wake_write();
             Poll::Ready(Ok(n))
-        }
+        };
+
+        self.try_wake_write();
+
+        r
     }
 }
 
@@ -108,18 +108,12 @@ impl AsyncWrite for VirBuf {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<crate::error::Result<usize>> {
-        if !self.can_fill() {
-            self.write_waker.lock().replace(cx.waker().clone());
-            Poll::Pending
-        } else {
-            {
-                let mut ct = self.container.lock();
-                ct.buffer.push_back(buf.to_vec());
-                ct.total += buf.len();
-            }
-
+        if self.container.lock().write(buf) {
             self.try_wake_read();
             Poll::Ready(Ok(buf.len()))
+        } else {
+            self.write_waker.lock().replace(cx.waker().clone());
+            Poll::Pending
         }
     }
 
@@ -132,11 +126,6 @@ impl AsyncWrite for VirBuf {
 }
 
 impl VirBuf {
-    fn can_fill(&self) -> bool {
-        let ct = self.container.lock();
-        ct.buffer.len() < ct.maxbuf
-    }
-
     fn try_wake_write(&mut self) {
         if let Some(waker) = self.write_waker.lock().take() {
             waker.wake();
@@ -151,27 +140,40 @@ impl VirBuf {
 }
 
 impl Container {
-    fn fill(&mut self, buf: &mut [u8]) -> error::Result<usize> {
+    fn write(&mut self, buf: &[u8]) -> bool {
+        if self.buffer.len() >= self.maxbuf {
+            false
+        } else {
+            self.buffer.push_back(buf.to_vec());
+            self.total += buf.len();
+            true
+        }
+    }
+
+    fn read(&mut self, buf: &mut [u8]) -> error::Result<usize> {
         let mut off = 0;
 
         while off < buf.len() {
             match self.buffer.pop_front() {
                 None => break,
-                Some(mut data) => {
+                Some(data) => {
+                    let rem = buf.len() - off;
                     let total = data.len();
 
-                    let mut vio = std::io::Cursor::new(&mut data);
+                    let fill = if total > rem { rem } else { total };
 
-                    let n = vio.read(&mut buf[off..])?;
+                    buf[off..off + fill].copy_from_slice(&data[..fill]);
 
-                    off += n;
+                    off += fill;
 
-                    if n < total {
-                        self.buffer.push_front(buf[n..].to_vec());
+                    if fill < total {
+                        self.buffer.push_front(data[fill..].to_vec());
                     }
                 }
             }
         }
+
+        self.total -= off;
 
         Ok(off)
     }
@@ -200,44 +202,47 @@ pub fn open() -> (Vitio, Vitio) {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::io::{AsyncReadExt, AsyncWriteExt};
+    use crate::{
+        core::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            protocol::{AsyncPacketRead, AsyncPacketSend},
+            rpc::{Decoder, Encoder},
+            stream::fragment::Fragment,
+        },
+        error,
+    };
 
     use super::open;
 
     #[tokio::test]
     async fn k() {
+        env_logger::builder()
+            .filter_level(log::LevelFilter::Debug)
+            .init();
+
         let (mut v1, mut v2) = open();
 
-        tokio::spawn(async move {
-            loop {
-                println!("call1 ...");
-
-                let mut buf = [0u8; 1024];
-
-                let n = v2.read(&mut buf).await.unwrap();
-
-                println!("{:?}", &buf[..n]);
-
-                v2.write_all(&mut buf[..n]).await.unwrap();
-            }
-        });
-
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         println!("call2 ...");
 
-        v1.write(&[0x1, 0x2]).await.unwrap();
-        v1.write(&[0x1, 0x2]).await.unwrap();
+        v1.send_packet(&Fragment::Ping.encode().unwrap())
+            .await
+            .unwrap();
 
-        let mut buf = [0u8; 1024];
+        // let n = v2.recv_packet().await.unwrap();
 
-        let n = v1.read(&mut buf).await.unwrap();
+        // let f: error::Result<Fragment> = f.to_vec().decode();
 
-        println!("{:?}", &buf[..n]);
+        // f.unwrap();
 
-        v1.write(&[0x1, 0x2]).await.unwrap();
+        let mut buf = [0u8; 1];
 
-        let n = v1.read(&mut buf).await.unwrap();
+        let da = v2.recv_packet().await.unwrap();
+
+        println!("{da:?}");
+
+        let n = v2.read(&mut buf).await.unwrap();
 
         println!("{:?}", &buf[..n])
     }

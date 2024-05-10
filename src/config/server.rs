@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{default_auth_timeout, Authentication, Compress, Crypto};
+use super::{default_auth_timeout, Authentication, Compress, Crypto, ListenMetadata};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -55,12 +55,6 @@ pub enum Listen {
     Tunnel(ListenMetadata),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-
-pub struct ListenMetadata {
-    pub bind: IpAddr,
-    pub port: u16,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct KcpListenMetadata {

@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use fuso::{
     cli,
@@ -16,9 +16,10 @@ use fuso::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
         protocol::{AsyncPacketRead, AsyncPacketSend},
-        rpc::{AsyncCall, Caller, Encoder},
+        rpc::{structs::port_forward::Target, AsyncCall, Caller, Decoder, Encoder},
         stream::{
             compress::CompressedStream,
+            fragment::Fragment,
             handshake::{Handshake, MuxConfig},
             UseCompress, UseCrypto,
         },
@@ -29,6 +30,7 @@ use fuso::{
     runner::{FnRunnable, NamedRunnable, Rise, ServiceRunner},
     runtime::{tokio::TokioRuntime, Runtime},
 };
+use kcp_rust::KcpConnector;
 
 fn main() {
     env_logger::Builder::new()
@@ -151,7 +153,7 @@ async fn enter_forward_service_main(
     if let Some(channels) = service.channel.as_ref() {
         for expose in channels.iter() {
             match expose {
-                Expose::Kcp(_, _) => todo!(),
+                Expose::Kcp(_, port) => {}
                 Expose::Tcp(_, port) => {
                     let port = *port;
                     let cryptos = service.crypto.clone();
@@ -209,24 +211,55 @@ async fn enter_forward_service_main(
     log::debug!("forward started .");
 
     loop {
-        let (mut linker, target) = forwarder.accept().await?;
+        let (linker, target) = forwarder.accept().await?;
         tokio::spawn(async move {
             log::debug!("target {:?}", target);
 
             match target {
-                FinalTarget::Udp { addr, port } => {
-                    let mut a = linker.link(Protocol::Tcp).await.unwrap();
-
-                    let mut buf = [0u8; 1024];
-
-                    let n = a.recv(&mut buf).await.unwrap();
-
-
-                    log::debug!("{:?}", &buf[..n]);
-
-                }
+                FinalTarget::Udp { addr, port } => {}
                 FinalTarget::Shell { path, args } => todo!(),
-                FinalTarget::Dynamic => todo!(),
+                FinalTarget::Dynamic => {
+                    let transmitter = linker.link(Protocol::Tcp).await.unwrap();
+
+                    let udp = Arc::new(tokio::net::UdpSocket::bind("0.0.0.0:0").await.unwrap());
+
+                    let (writer, mut reader) = transmitter.split();
+
+                    loop {
+                        let pkt = match reader.recv_packet().await {
+                            Err(_) => break,
+                            Ok(data) => data,
+                        };
+
+                        let pkt: Fragment = pkt.decode().unwrap();
+
+                        let udp = udp.clone();
+                        let mut writer = writer.clone();
+
+                        match pkt {
+                            Fragment::UdpForward {
+                                saddr,
+                                daddr,
+                                dport,
+                                data,
+                            } => {
+                                let target = format!("{}:{dport}", daddr.to_string());
+                                log::debug!("udp forward {saddr} -> {target}");
+                                udp.send_to(&data, target).await.unwrap();
+                                let mut buf = [0u8; 1400];
+                                let (n, addr) = udp.recv_from(&mut buf).await.unwrap();
+
+                                writer
+                                    .send_packet(
+                                        &Fragment::Udp(saddr, buf[..n].to_vec()).encode().unwrap(),
+                                    )
+                                    .await
+                                    .unwrap();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 FinalTarget::Tcp { addr, port } => {
                     let result = addr
                         .try_connect(port, |host, port| async move {

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     default_auth_timeout, Authentication, BootKind, Compress, Crypto, Expose, KeepAlive,
-    RestartPolicy,
+    ListenMetadata, RestartPolicy,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -97,22 +97,28 @@ pub struct WithForwardService {
     #[serde(default = "Default::default")]
     pub compress: HashSet<Compress>,
     /// 访问端建立连接后的前置处理方式
+    #[serde(flatten)]
     #[serde(default = "Default::default")]
     pub prepares: PrepareForward,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct PrepareForward {
-    socks5: Option<WithSocks5Prepare>,
+    pub socks5: Option<WithSocks5Prepare>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct WithSocks5Prepare {
+    #[serde(default = "Default::default")]
+    pub udp: Option<UdpForwardConfig>,
     /// 认证方式
-    auth: Authentication,
-    /// 是否启动udp转发
-    #[serde(default = "default_socks5_udp_forward")]
-    udp_forward: bool,
+    pub auth: Authentication,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub struct UdpForwardConfig {
+    pub bind: IpAddr,
+    pub port: u16,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -318,6 +324,15 @@ impl From<Addr> for String {
     }
 }
 
+impl ToString for Addr {
+    fn to_string(&self) -> String {
+        match self {
+            Addr::WithIpAddr(ip) => ip.to_string(),
+            Addr::WithDomain(domain) => domain.to_string(),
+        }
+    }
+}
+
 /// 默认随机分配一个端口
 fn default_exposes() -> HashSet<Expose> {
     let mut exposes = HashSet::new();
@@ -325,10 +340,6 @@ fn default_exposes() -> HashSet<Expose> {
     exposes.insert(Expose::Tcp(super::IP::V4, 0));
 
     exposes
-}
-
-fn default_socks5_udp_forward() -> bool {
-    true
 }
 
 #[cfg(test)]
@@ -357,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize(){
+    fn test_serialize() {
         let a = super::Config::default();
         let a: super::Config = a.encode().unwrap().decode().unwrap();
     }

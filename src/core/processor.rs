@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::error;
+
 use super::{
     io::{AsyncRead, AsyncWrite},
     BoxedFuture,
@@ -9,6 +11,16 @@ pub enum Process<A, R> {
     Next(A),
     Reject(A),
     Resolve(R),
+}
+
+pub enum Selector<In, Out> {
+    Next(In),
+    Accepted(Out),
+}
+
+pub enum Prepare<In, Out> {
+    Ok(Out),
+    Bad(In),
 }
 
 pub trait Preprocessor<In> {
@@ -42,6 +54,10 @@ pub struct Processor<'a, A, R> {
 pub struct AbstractPreprocessor<'a, In, Out>(
     pub(crate) Arc<dyn Preprocessor<In, Output = Out> + Sync + Send + 'a>,
 );
+
+pub struct PreprocessorSelector<'a, In, Out> {
+    pres: Vec<AbstractPreprocessor<'a, In, error::Result<Selector<In, Out>>>>,
+}
 
 impl<A, R> IProcessor<A, R> for AbstractProcessor<'_, A, R>
 where
@@ -97,5 +113,42 @@ impl<In, Out> Preprocessor<In> for AbstractPreprocessor<'_, In, Out> {
 impl<In, Out> Clone for AbstractPreprocessor<'_, In, Out> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+impl<'p, In, Out> PreprocessorSelector<'p, In, Out> {
+    pub fn new() -> Self {
+        Self {
+            pres: Default::default(),
+        }
+    }
+
+    pub fn add<P>(&mut self, p: P)
+    where
+        P: Preprocessor<In, Output = error::Result<Selector<In, Out>>> + Sync + Send + 'p,
+    {
+        self.pres.push(AbstractPreprocessor(Arc::new(p)))
+    }
+}
+
+impl<'p, In, Out> Preprocessor<In> for PreprocessorSelector<'p, In, Out>
+where
+    In: Send,
+{
+    type Output = error::Result<Prepare<In, Out>>;
+
+    fn prepare<'a>(&'a self, input: In) -> BoxedFuture<'a, Self::Output> {
+        Box::pin(async move {
+            let mut input = input;
+
+            for prep in self.pres.iter() {
+                input = match prep.prepare(input).await? {
+                    Selector::Next(input) => input,
+                    Selector::Accepted(out) => return Ok(Prepare::Ok(out)),
+                }
+            }
+
+            Ok(Prepare::Bad(input))
+        })
     }
 }

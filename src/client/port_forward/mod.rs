@@ -8,12 +8,9 @@ pub use linker::*;
 use crate::core::connector::ReplicableConnector;
 use crate::core::rpc::structs::port_forward::Target;
 use crate::core::transfer::AbstractTransmitter;
-use crate::{
-    core::{
-        connector::AbstractConnector,
-        rpc::{structs::port_forward::Request, AsyncCallee},
-    },
-    error,
+use crate::core::{
+    connector::AbstractConnector,
+    rpc::{structs::port_forward::Request, AsyncCallee},
 };
 use std::sync::Arc;
 use std::{marker::PhantomData, pin::Pin, task::Poll};
@@ -21,7 +18,7 @@ use std::{marker::PhantomData, pin::Pin, task::Poll};
 use crate::{
     client::port_forward::transport::Transport,
     config::client::FinalTarget,
-    core::{accepter::Accepter, connector::Connector, Connection, Stream},
+    core::{accepter::Accepter, connector::Connector, Stream},
     runtime::Runtime,
 };
 
@@ -70,6 +67,10 @@ where
         match Pin::new(&mut self.transport).poll_next(ctx)? {
             Poll::Pending => Poll::Pending,
             Poll::Ready((request, responder)) => match request {
+                Request::Dyn(token, _) => {
+                    let linker = Linker::new(token, self.connector.clone(), responder);
+                    Poll::Ready(Ok((linker, FinalTarget::Dynamic)))
+                }
                 Request::New(token, target) => Poll::Ready(Ok({
                     let linker = Linker::new(token, self.connector.clone(), responder);
                     (linker, {

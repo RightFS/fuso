@@ -55,6 +55,10 @@ impl<'a, O> LazyFuture<'a, O> {
     pub fn new() -> Self {
         Self(Default::default())
     }
+
+    pub fn reset(&mut self) {
+        drop(self.0.take());
+    }
 }
 
 impl<'a, O> Poller<'a, O> {
@@ -69,7 +73,7 @@ impl<'a, O> Poller<'a, O> {
         self.0.push(Box::pin(fut))
     }
 
-    pub fn has_more(&self) -> bool{
+    pub fn has_more(&self) -> bool {
         self.0.len() > 0
     }
 }
@@ -107,7 +111,7 @@ impl<O> std::future::Future for Poller<'_, O> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         for (idx, fut) in self.0.iter_mut().enumerate() {
             if let Poll::Ready(o) = Pin::new(fut).poll(cx) {
-                self.0.remove(idx);
+                drop(self.0.remove(idx));
                 return Poll::Ready(o);
             }
         }

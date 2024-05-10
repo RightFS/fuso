@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Deref,
     sync::Arc,
 };
@@ -47,6 +47,14 @@ pub enum Crypto {
     Aes,
     Rsa,
 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+
+pub struct ListenMetadata {
+    pub bind: IpAddr,
+    pub port: u16,
+}
+
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
