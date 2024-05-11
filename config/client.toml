@@ -13,7 +13,7 @@ auth = { type = "secret", secret = "12345678" }
 type = "forward"
 boot = "fork"
 exposes = [ "8080/tcp" ]
-channel = [ "8002/tcp", "9090/kcp"]
+channel = [ "8002/tcp"]
 restart = "always"
 cryptos = ["aes"]
 compress = ["lz4"]

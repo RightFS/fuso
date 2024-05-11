@@ -16,6 +16,11 @@ pub mod error;
 
 pub mod runtime;
 
+#[cfg(feature = "fuso-manager")]
+pub mod api;
+
+mod toy;
+pub use toy::*;
 
 pub fn enter_async_main<F>(fut: F) -> error::Result<()>
 where

@@ -125,18 +125,18 @@ where
             _ => true,
         });
 
-        let time = conns
-            .iter()
-            .map(|u| u.conn.next_update())
-            .min_by(|x, y| x.cmp(y));
+        // let time = conns
+        //     .iter()
+        //     .map(|u| u.conn.next_update())
+        //     .min_by(|x, y| x.cmp(y));
 
-        if let Some(next) = time {
-            let mut next_update = self.next_update.lock();
-            next_update.reset();
-            let _ = next_update.poll(cx, || {
-                R::sleep(std::time::Duration::from_millis(next as u64))
-            });
-        }
+        // if let Some(next) = time {
+        //     let mut next_update = self.next_update.lock();
+        //     next_update.reset();
+        //     let _ = next_update.poll(cx, || {
+        //         R::sleep(std::time::Duration::from_millis(next as u64))
+        //     });
+        // }
 
         std::task::Poll::Pending
     }

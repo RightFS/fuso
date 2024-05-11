@@ -50,6 +50,7 @@ fuso-manager = [ "dep:axum", "fuso-rt-tokio"]
 
 [build-dependencies]
 cc = "1.0"
+bindgen = "0.69.4"
 
 
 [dependencies]
@@ -62,6 +63,7 @@ rmp-serde = "1.3.0"
 rand = "0.8.5"
 tun = { version = "0.6.1", features = ["async"] }
 futures = { version = "0.3.30", optional = true}
+mio = { version = "0.8.11", features = ["os-poll"] }
 
 [dependencies.kcp-rust]
 optional = true

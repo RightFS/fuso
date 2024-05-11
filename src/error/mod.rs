@@ -17,6 +17,7 @@ pub enum FusoError {
     InvalidExposeType,
     NotResponse,
     Custom(String),
+    BadCString(std::ffi::NulError),
     MsgPack(MsgPack),
     TomlDeError(toml::de::Error),
     StdIo(std::io::Error),
@@ -39,6 +40,12 @@ impl From<std::io::Error> for FusoError {
 impl From<toml::de::Error> for FusoError {
     fn from(value: toml::de::Error) -> Self {
         Self::TomlDeError(value)
+    }
+}
+
+impl From<std::ffi::NulError> for FusoError{
+    fn from(value: std::ffi::NulError) -> Self {
+        Self::BadCString(value)
     }
 }
 
