@@ -8,8 +8,9 @@ use c::bindings;
 pub use c::windows_ext::*;
 #[cfg(windows)]
 use std::task::Poll;
+
 #[cfg(windows)]
-use crate::task::{setter, Getter, Setter};
+use crate::core::task::{setter, Getter, Setter};
 
 use parking_lot::Mutex;
 
@@ -228,7 +229,7 @@ impl Pty {
 
             #[cfg(windows)]
             {
-                pty.work = proc.work_dir as _;
+                pty.work_dir = proc.work_dir as _;
                 pty.cmdline = proc.cmdline as _;
                 if proc.environs.is_empty() {
                     pty.environs = std::ptr::null();
@@ -247,10 +248,16 @@ impl Pty {
                 }
 
                 pty.exit_cb = pty_process_exit_cb as _;
+            }
 
-                let (set_input_signal, input_signal) = setter::<()>();
-                let (set_output_signal, output_signal) = setter::<()>();
+            #[cfg(windows)]
+            let (set_input_signal, input_signal) = setter::<()>();
 
+            #[cfg(windows)]
+            let (set_output_signal, output_signal) = setter::<()>();
+
+            #[cfg(windows)]
+            {
                 pty.exit_cb_data =
                     Box::into_raw(Box::new((set_input_signal, set_output_signal))) as _;
             }
