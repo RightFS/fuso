@@ -5,8 +5,6 @@ use std::{collections::HashMap, ffi::CString, pin::Pin, sync::Arc};
 use c::bindings;
 
 #[cfg(windows)]
-use crate::task::{setter, Getter, Setter};
-#[cfg(windows)]
 pub use c::windows_ext::*;
 #[cfg(windows)]
 use std::task::Poll;
