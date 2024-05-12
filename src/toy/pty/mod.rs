@@ -1,18 +1,20 @@
 mod c;
 
-use std::{collections::HashMap, ffi::CString, pin::Pin, sync::Arc, task::Poll};
+use std::{collections::HashMap, ffi::CString, pin::Pin, sync::Arc};
 
 use c::bindings;
 
 #[cfg(windows)]
 pub use c::windows_ext::*;
+#[cfg(windows)]
+use std::task::Poll;
+#[cfg(windows)]
+use crate::task::{setter, Getter, Setter};
+
 use parking_lot::Mutex;
 
 use crate::{
-    core::{
-        io::{AsyncRead, AsyncWrite},
-        task::{setter, Getter, Setter},
-    },
+    core::io::{AsyncRead, AsyncWrite},
     error,
 };
 
@@ -62,6 +64,7 @@ pub struct Pty {
     cmdline: CString,
     #[cfg(windows)]
     input_signal: Getter<()>,
+    #[cfg(windows)]
     output_signal: Getter<()>,
 }
 
@@ -94,6 +97,11 @@ pub trait OpenPty {
     fn connect_output(output: String) -> error::Result<AbstractPtyOutput>;
 }
 
+#[cfg(not(windows))]
+pub trait OpenPty {
+    fn pipe(input: i32) -> error::Result<(AbstractPtyInput, AbstractPtyOutput)>;
+}
+
 impl Pty {
     fn open(
         prog: String,
@@ -110,7 +118,7 @@ impl Pty {
             };
 
             #[cfg(not(windows))]
-            let mut argv = {
+            let argv = {
                 let mut argv = Vec::<CString>::new();
 
                 argv.push(CString::new(prog)?);
@@ -159,7 +167,10 @@ impl Pty {
                 )?
             };
 
+            #[cfg(windows)]
             let pipe_input_name = CString::new(format!("pty-fuso-input-{}", std::process::id()))?;
+
+            #[cfg(windows)]
             let pipe_output_name = CString::new(format!("pty-fuso-output-{}", std::process::id()))?;
 
             let proc = Process {
@@ -198,44 +209,51 @@ impl Pty {
                 },
                 #[cfg(windows)]
                 cmdline: cmdline.as_ptr() as _,
+                #[cfg(windows)]
                 pipe_input_name: pipe_input_name.as_ptr() as _,
+                #[cfg(windows)]
                 pipe_output_name: pipe_output_name.as_ptr() as _,
             };
 
             #[cfg(not(windows))]
             {
                 pty.argv = proc.args.as_ptr() as _;
-                pty.envp = proc.envp.as_ptr() as _;
+                pty.environs = proc.environs.as_ptr() as _;
+            }
+
+            #[cfg(not(windows))]
+            {
+                pty.work = proc.work_dir as _;
             }
 
             #[cfg(windows)]
             {
+                pty.work = proc.work_dir as _;
                 pty.cmdline = proc.cmdline as _;
                 if proc.environs.is_empty() {
                     pty.environs = std::ptr::null();
                 } else {
                     pty.environs = proc.environs.as_ptr() as _;
                 }
-            }
 
-            pty.work_dir = proc.work_dir as _;
-            pty.pipe_input_name = proc.pipe_input_name;
-            pty.pipe_output_name = proc.pipe_output_name;
-
-            fn pty_process_exit_cb(data: *mut std::os::raw::c_void) {
-                unsafe {
-                    drop(Box::<(Setter<()>, Setter<()>)>::from_raw(
-                        data as *mut (Setter<()>, Setter<()>),
-                    ));
+                pty.pipe_input_name = proc.pipe_input_name;
+                pty.pipe_output_name = proc.pipe_output_name;
+                fn pty_process_exit_cb(data: *mut std::os::raw::c_void) {
+                    unsafe {
+                        drop(Box::<(Setter<()>, Setter<()>)>::from_raw(
+                            data as *mut (Setter<()>, Setter<()>),
+                        ));
+                    }
                 }
+
+                pty.exit_cb = pty_process_exit_cb as _;
+
+                let (set_input_signal, input_signal) = setter::<()>();
+                let (set_output_signal, output_signal) = setter::<()>();
+
+                pty.exit_cb_data =
+                    Box::into_raw(Box::new((set_input_signal, set_output_signal))) as _;
             }
-
-            pty.exit_cb = pty_process_exit_cb as _;
-
-            let (set_input_signal, input_signal) = setter::<()>();
-            let (set_output_signal, output_signal) = setter::<()>();
-
-            pty.exit_cb_data = Box::into_raw(Box::new((set_input_signal, set_output_signal))) as _;
 
             let error = bindings::pty_spawn(&mut pty as *mut bindings::PtyProcess);
 
@@ -248,14 +266,16 @@ impl Pty {
                     work,
                     #[cfg(not(windows))]
                     argv,
-                    #[cfg(not(windows))]
-                    envp,
                     #[cfg(windows)]
                     cmdline,
                     environs,
+                    #[cfg(windows)]
                     pipe_input_name,
+                    #[cfg(windows)]
                     pipe_output_name,
+                    #[cfg(windows)]
                     input_signal,
+                    #[cfg(windows)]
                     output_signal,
                 })
             }
@@ -365,6 +385,17 @@ impl PtyBuilder {
                 output: Arc::new(Mutex::new(output)),
             })
         }
+
+        #[cfg(not(windows))]
+        {
+            let (input, output) = O::pipe(pty.pty.pty)?;
+
+            Ok(OpenedPty {
+                pty: Arc::new(Mutex::new(pty)),
+                input: Arc::new(Mutex::new(input)),
+                output: Arc::new(Mutex::new(output)),
+            })
+        }
     }
 }
 
@@ -384,6 +415,7 @@ unsafe impl Send for OpenedPty {}
 impl<T> PtyInput for T where T: AsyncWrite + Unpin {}
 impl<T> PtyOutput for T where T: AsyncRead + Unpin {}
 
+#[cfg(windows)]
 impl AsyncRead for OpenedPty {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -401,6 +433,7 @@ impl AsyncRead for OpenedPty {
     }
 }
 
+#[cfg(windows)]
 impl AsyncWrite for OpenedPty {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
@@ -432,7 +465,41 @@ impl AsyncWrite for OpenedPty {
     }
 }
 
+#[cfg(not(windows))]
+impl AsyncRead for OpenedPty {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> std::task::Poll<error::Result<usize>> {
+        let mut output = self.output.lock();
+        Pin::new(&mut *output.0).poll_read(cx, buf)
+    }
+}
+
+#[cfg(not(windows))]
+impl AsyncWrite for OpenedPty {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<error::Result<usize>> {
+        let mut input = self.input.lock();
+        Pin::new(&mut *input.0).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<error::Result<()>> {
+        let mut input = self.input.lock();
+        Pin::new(&mut *input.0).poll_flush(cx)
+    }
+}
+
 #[cfg(test)]
+#[cfg(windows)]
+#[cfg(feature = "fuso-rt-tokio")]
 mod tests {
 
     use crate::{
@@ -441,8 +508,6 @@ mod tests {
     };
 
     #[tokio::test]
-    #[cfg(windows)]
-    #[cfg(feature = "fuso-rt-tokio")]
     async fn test_pty() {
         let (output, input) = super::builder("C:\\windows\\system32\\cmd.exe")
             .build()
@@ -454,6 +519,31 @@ mod tests {
         tokio::select! {
             _ = io::copy(input, tokio::io::stdin()) => {}
             _ = io::copy(tokio::io::stdout(), output) => {}
+        };
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(windows))]
+#[cfg(feature = "fuso-rt-tokio")]
+mod tests {
+
+    use crate::core::{io, split::SplitStream};
+
+    #[tokio::test]
+    async fn test_pty() {
+        let (output, input) = super::builder("/bin/bash")
+            .build()
+            .expect("Failed to open pty")
+            .split();
+
+        tokio::select! {
+            e = io::copy(input, tokio::io::stdin()) => {
+                println!("{e:?}")
+            }
+            e = io::copy(tokio::io::stdout(), output) => {
+                println!("{e:?}")
+            }
         };
     }
 }

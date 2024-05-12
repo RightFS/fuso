@@ -259,7 +259,7 @@ int conpty_init() {
 
 #else
 
-void enter_pty_main(const int argc, char *const *argv, const char **envp);
+void enter_pty_main(char *const *argv, const char **envp);
 
 int pty_spawn(pty_process *process) {
   int pid;
@@ -274,7 +274,7 @@ int pty_spawn(pty_process *process) {
   if (pid < 0) {
     return -errno;
   } else if (pid == 0) {
-    enter_pty_main(process->argc, process->argv, process->envp);
+    enter_pty_main(process->argv, process->environs);
   }
 
   if ((flags = fcntl(master, F_GETFL)) == -1) {
@@ -318,7 +318,7 @@ void pty_exit(pty_process *process) {
   process->pid = -1;
 }
 
-void enter_pty_main(const int argc, char *const *argv, const char **envp) {
+void enter_pty_main(char *const *argv, const char **envp) {
   int ret = execvp(argv[0], argv);
   if (ret < 0) {
     _exit(-errno);

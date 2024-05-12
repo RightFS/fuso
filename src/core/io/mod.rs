@@ -4,11 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::{error, select};
-
-use super::{BoxedFuture, Stream};
-
-use crate::core::split::SplitStream;
+use crate::error;
 
 pub trait AsyncRead {
     fn poll_read(
