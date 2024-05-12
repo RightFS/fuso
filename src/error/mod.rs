@@ -17,6 +17,7 @@ pub enum FusoError {
     InvalidExposeType,
     NotResponse,
     Custom(String),
+    Utf8Error(std::str::Utf8Error),
     BadCString(std::ffi::NulError),
     MsgPack(MsgPack),
     TomlDeError(toml::de::Error),
@@ -73,6 +74,12 @@ impl From<FusoError> for std::io::Error {
             FusoError::StdIo(io) => io,
             value => std::io::Error::new(std::io::ErrorKind::Other, value),
         }
+    }
+}
+
+impl From<std::str::Utf8Error> for FusoError{
+    fn from(value: std::str::Utf8Error) -> Self {
+        Self::Utf8Error(value)
     }
 }
 

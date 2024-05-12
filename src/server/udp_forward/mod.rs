@@ -53,7 +53,7 @@ impl UdpForwarderImpl {
                             addr,
                             pkt.addr()
                         );
-
+                        
                         let (mut daddr, port) = unpack_socks_addr!(pkt.addr);
 
                         writer

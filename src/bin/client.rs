@@ -210,8 +210,6 @@ async fn enter_forward_service_main(
 
     log::debug!("forward started .");
 
-    
-
     loop {
         let (linker, target) = forwarder.accept().await?;
         tokio::spawn(async move {
@@ -219,7 +217,12 @@ async fn enter_forward_service_main(
 
             match target {
                 FinalTarget::Udp { addr, port } => {}
-                FinalTarget::Shell { path, args } => todo!(),
+                FinalTarget::Shell { path, args } => {
+                    let mut builder = fuso::pty::builder("");
+
+                    
+                    
+                }
                 FinalTarget::Dynamic => {
                     let transmitter = linker.link(Protocol::Tcp).await.unwrap();
 

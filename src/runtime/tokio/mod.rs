@@ -1,5 +1,6 @@
 mod kcp;
 mod tcp;
+mod pty;
 
 mod port_forward;
 

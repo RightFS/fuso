@@ -90,6 +90,7 @@ where
         }
 
         writer.write_all(&buf[..n]).await?;
+        writer.flush().await?;
     }
 }
 

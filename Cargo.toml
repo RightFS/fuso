@@ -50,7 +50,6 @@ fuso-manager = [ "dep:axum", "fuso-rt-tokio"]
 
 [build-dependencies]
 cc = "1.0"
-bindgen = "0.69.4"
 
 
 [dependencies]
@@ -73,7 +72,8 @@ default-features = false
 
 [dependencies.fuso-socks]
 optional = true
-path = "../fuso-socks5"
+git = "https://github.com/editso/fuso-socks5"
+branch = "2.0"
 
 [dependencies.axum]
 optional = true
