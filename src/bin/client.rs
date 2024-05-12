@@ -218,10 +218,15 @@ async fn enter_forward_service_main(
             match target {
                 FinalTarget::Udp { addr, port } => {}
                 FinalTarget::Shell { path, args } => {
-                    let mut builder = fuso::pty::builder("");
+                    let mut builder = fuso::pty::builder(path);
+ 
+                    builder.args(&args);
 
-                    
-                    
+                    let pty = builder.build().unwrap();
+
+                    if let Ok(a) = linker.link(Protocol::Tcp).await {
+                        a.transfer(pty).await.unwrap();
+                    };
                 }
                 FinalTarget::Dynamic => {
                     let transmitter = linker.link(Protocol::Tcp).await.unwrap();

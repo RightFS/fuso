@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #else
+#include <stdlib.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pty.h>
@@ -259,7 +260,7 @@ int conpty_init() {
 
 #else
 
-void enter_pty_main(char *const *argv, const char **envp);
+void enter_pty_main(const char *cwd, char *const *argv, const char **envp);
 
 int pty_spawn(pty_process *process) {
   int pid;
@@ -274,7 +275,7 @@ int pty_spawn(pty_process *process) {
   if (pid < 0) {
     return -errno;
   } else if (pid == 0) {
-    enter_pty_main(process->argv, process->environs);
+    enter_pty_main(process->work, process->argv, process->environs);
   }
 
   if ((flags = fcntl(master, F_GETFL)) == -1) {
@@ -318,7 +319,17 @@ void pty_exit(pty_process *process) {
   process->pid = -1;
 }
 
-void enter_pty_main(char *const *argv, const char **envp) {
+void enter_pty_main(const char *cwd, char *const *argv, const char **envp) {
+
+  if (cwd != NULL)
+    chdir(cwd);
+
+  if (envp != NULL) {
+    clearenv();
+    const char **p = envp;
+    for (; *p; p++) putenv((char *)*p);
+  }
+
   int ret = execvp(argv[0], argv);
   if (ret < 0) {
     _exit(-errno);

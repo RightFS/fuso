@@ -5,6 +5,8 @@ use std::{collections::HashMap, ffi::CString, pin::Pin, sync::Arc};
 use c::bindings;
 
 #[cfg(windows)]
+use crate::task::{setter, Getter, Setter};
+#[cfg(windows)]
 pub use c::windows_ext::*;
 #[cfg(windows)]
 use std::task::Poll;
@@ -539,10 +541,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_pty() {
-        let (output, input) = super::builder("/bin/bash")
-            .build()
-            .expect("Failed to open pty")
-            .split();
+        let mut builder = super::builder("/bin/bash");
+
+        builder
+            .work_dir("/")
+            .inherit_parent_env(true)
+            .env("aa", "1")
+            .env("C", "C");
+
+        let (output, input) = builder.build().expect("Failed to open pty").split();
 
         tokio::select! {
             e = io::copy(input, tokio::io::stdin()) => {
