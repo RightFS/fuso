@@ -13,10 +13,10 @@ port = 8888
 context = "/api"
 auth = { type = "secret", secret = "secret" }
 
-[[listen]]
-type = "kcp"
-port = 6666
-bind = "0.0.0.0"
+# [[listen]]
+# type = "kcp"
+# port = 6666
+# bind = "0.0.0.0"
 
 
 [[listen]]
@@ -28,7 +28,7 @@ auth = { type = "secret", secret = "ffsdfsdfjkl" }
 compress = ["lz4"]
 
 
-[[listen]]
-type = "tcp"
-port = 8880
-bind = "127.0.0.1"
+# [[listen]]
+# type = "tcp"
+# port = 8880
+# bind = "127.0.0.1"

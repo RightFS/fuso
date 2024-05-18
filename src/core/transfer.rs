@@ -250,7 +250,7 @@ where
         Pin::new(&mut *this).poll_send(cx, buf)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<error::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<error::Result<()>> {
         Poll::Ready(Ok(()))
     }
 }

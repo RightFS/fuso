@@ -5,9 +5,12 @@ use std::{
     task::{Context, Poll},
 };
 
+use kcp_rust::KcpRuntime;
+
 use crate::{
     core::{
         accepter::Accepter,
+        connector::Connector,
         future::LazyFuture,
         io::{AsyncRead, AsyncWrite},
     },
@@ -29,6 +32,9 @@ pub struct KcpListener {
         std::io::Result<(SocketAddr, kcp_rust::KcpStream<kcp_rust::ServerImpl>)>,
     >,
 }
+
+#[derive(Clone)]
+pub struct KcpConnector(Arc<kcp_rust::KcpConnector<UdpSocket<'static>>>);
 
 pub enum KcpStream {
     Client(kcp_rust::KcpStream<kcp_rust::ClientImpl>),
@@ -73,6 +79,33 @@ impl Accepter for KcpListener {
             Poll::Pending => Poll::Pending,
             Poll::Ready((addr, stream)) => Poll::Ready(Ok((addr, KcpStream::Server(stream)))),
         }
+    }
+}
+
+impl KcpConnector {
+    pub async fn new<P, F, Fut>(conf: kcp_rust::Config, f: F) -> error::Result<Self>
+    where
+        P: KcpRuntime<Err = error::FusoError>,
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = error::Result<UdpSocket<'static>>>,
+    {
+        let udp = f().await?;
+        let connector = kcp_rust::KcpConnector::new::<P>(udp, conf)?;
+        Ok(Self(Arc::new(connector)))
+    }
+}
+
+impl Connector<()> for KcpConnector {
+    type Output = KcpStream;
+
+    fn connect<'conn>(
+        &'conn self,
+        _: (),
+    ) -> crate::core::BoxedFuture<'conn, error::Result<Self::Output>> {
+        Box::pin(async move {
+            let (_, stream) = self.0.open().await?;
+            Ok(KcpStream::Client(stream))
+        })
     }
 }
 

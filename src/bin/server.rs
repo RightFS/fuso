@@ -58,7 +58,6 @@ async fn enter_fuso_main(conf: Config) -> error::Result<()> {
 
     enter_fuso_serve(Stateful::new(conf)).await?;
 
-    
     // axum::serve(tcp_listener, make_service)
 
     loop {
@@ -173,7 +172,7 @@ async fn enter_fuso_serve(conf: Stateful<Config>) -> error::Result<()> {
 
         tokio::spawn(async move {
             if let Err(e) = handle_connection(conf, transport).await {
-                log::error!("{:?}", e);
+                log::error!("transport closed {e:?}");
             }
         });
     }
@@ -292,13 +291,8 @@ where
 
             log::debug!("start forward {} -> {}", c1.addr(), c2.addr());
 
-            
-
             tokio::spawn(async move {
-                
                 let _ = c1.transfer(c2).await;
-
-               
             });
         }
     });

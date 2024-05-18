@@ -126,3 +126,9 @@ impl Accepter for tokio::net::TcpListener {
         }
     }
 }
+
+impl<'a> From<tokio::net::TcpStream> for AbstractStream<'a>{
+    fn from(stream: tokio::net::TcpStream) -> Self {
+        AbstractStream::new(stream)
+    }
+}

@@ -224,6 +224,10 @@ impl<'a> Clone for UdpSocket<'a> {
 }
 
 impl<'a> UdpSocket<'a> {
+    pub fn new(udp: AbstractDatagram<'a>) -> Self {
+        Self { inner: udp }
+    }
+
     pub async fn bind<P, A>(addr: A) -> error::Result<(SocketAddr, Self)>
     where
         P: UdpProvider,

@@ -1,5 +1,6 @@
 use std::{net::SocketAddr, sync::Arc, task::Poll};
 
+use kcp_rust::Canceler;
 use tokio::io::ReadBuf;
 
 use crate::{
@@ -28,6 +29,12 @@ impl KcpListener {
             inner: Arc::new(listener),
             stored: LazyFuture::new(),
         })
+    }
+}
+
+impl TokioUdpSocket {
+    pub fn new(udp: tokio::net::UdpSocket) -> Self {
+        Self(Arc::new(udp))
     }
 }
 
@@ -71,13 +78,24 @@ impl kcp_rust::KcpRuntime for UdpWithTokioRuntime {
 impl kcp_rust::Runner for UdpWithTokioRuntime {
     type Err = error::FusoError;
 
-    fn start(process: kcp_rust::Background) -> std::result::Result<(), Self::Err> {
+    fn start(process: kcp_rust::Background) -> std::result::Result<Canceler, Self::Err> {
+        let (canceler, sig) = Canceler::new();
+
         crate::runtime::tokio::TokioRuntime::spawn(async move {
-            if let Err(e) = process.await {
-                log::warn!("{:?}", e);
+            let kind = process.kind();
+            tokio::select! {
+                _ = sig.recv() => {
+                    log::debug!("stop kcp {kind:?}");
+                }
+                e = process => {
+                    if let Err(e) = e{
+                        log::debug!("kcp error {e:?}");
+                    }
+                }
             }
         });
-        Ok(())
+
+        Ok(canceler)
     }
 }
 
@@ -145,5 +163,11 @@ impl crate::core::net::AsyncSend for TokioUdpSocket {
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
         self.0.poll_send(cx, buf)
+    }
+}
+
+impl<'u> From<tokio::net::UdpSocket> for crate::core::net::UdpSocket<'u> {
+    fn from(udp: tokio::net::UdpSocket) -> Self {
+        Self::new(Box::new(TokioUdpSocket::new(udp)))
     }
 }

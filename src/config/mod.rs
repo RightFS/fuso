@@ -78,7 +78,7 @@ pub enum IP {
 #[serde(try_from = "String")]
 pub enum Expose {
     Kcp(IP, u16),
-    Tcp(IP, u16),
+    Tcp(IP, u16)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

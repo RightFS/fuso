@@ -51,7 +51,6 @@ pub trait AsyncPacketSend: AsyncWrite {
             },
         }
     }
-    
 }
 
 impl<T> AsyncPacketRead for T where T: AsyncRead {}
@@ -106,8 +105,7 @@ impl Buffer {
             match Pin::new(&mut *reader).poll_read(cx, &mut self.data[off..])? {
                 Poll::Pending => break,
                 Poll::Ready(0) => {
-                    log::debug!("error ................");
-                    return Poll::Ready(Err(io::Error::from(io::ErrorKind::UnexpectedEof).into()))
+                    return Poll::Ready(Err(io::Error::from(io::ErrorKind::ConnectionReset).into()))
                 }
                 Poll::Ready(n) => {
                     self.off += n;

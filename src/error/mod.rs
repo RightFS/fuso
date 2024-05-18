@@ -17,6 +17,8 @@ pub enum FusoError {
     InvalidExposeType,
     NotResponse,
     Custom(String),
+    UnsupportProtocol,
+    KcpError(kcp_rust::KcpError),
     Utf8Error(std::str::Utf8Error),
     BadCString(std::ffi::NulError),
     MsgPack(MsgPack),
@@ -53,6 +55,12 @@ impl From<std::ffi::NulError> for FusoError{
 impl From<rmp_serde::encode::Error> for FusoError {
     fn from(value: rmp_serde::encode::Error) -> Self {
         Self::MsgPack(MsgPack::Encode(value))
+    }
+}
+
+impl From<kcp_rust::KcpError> for FusoError{
+    fn from(value: kcp_rust::KcpError) -> Self {
+        Self::KcpError(value)
     }
 }
 

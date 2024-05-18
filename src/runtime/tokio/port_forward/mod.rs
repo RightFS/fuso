@@ -48,11 +48,8 @@ where
 {
     pub fn new<C>(transport: S, target: FinalTarget, connector: C) -> Self
     where
-        C: Connector<Protocol, Output = AbstractTransmitter<'static>>
-            + Sync
-            + Send
-            + Unpin
-            + 'static,
+        C: Connector<Protocol, Output = AbstractTransmitter<'static>>,
+        C: Sync + Send + Unpin + 'static,
     {
         Self::new_with_runtime(transport, target, connector)
     }

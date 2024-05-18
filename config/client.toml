@@ -12,8 +12,8 @@ auth = { type = "secret", secret = "12345678" }
 [ssh1]
 type = "forward"
 boot = "fork"
-exposes = [ "8080/tcp" ]
-channel = [ "8002/tcp"]
+exposes = [ "8080/tcp"]
+channel = [ "8002/kcp"]
 restart = "always"
 cryptos = ["aes"]
 compress = ["lz4"]

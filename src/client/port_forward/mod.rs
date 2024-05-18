@@ -36,11 +36,8 @@ where
 {
     pub fn new_with_runtime<C>(transport: S, target: FinalTarget, connector: C) -> Self
     where
-        C: Connector<Protocol, Output = AbstractTransmitter<'static>>
-            + Sync
-            + Send
-            + Unpin
-            + 'static,
+        C: Connector<Protocol, Output = AbstractTransmitter<'static>>,
+        C: Sync + Send + Unpin + 'static,
     {
         let transport = Transport::new::<R>(std::time::Duration::from_secs(1), transport);
 

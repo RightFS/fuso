@@ -9,7 +9,6 @@ fn main() {
 fn compile_tty_and_generate_bindings() {
     let manifest_root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let tty_source_dir = format!("{manifest_root}/src/toy/pty/c");
-    let tty_bindings_out_dir = format!("{}/pty_bindings.rs", std::env::var("OUT_DIR").unwrap());
 
     println!("cargo:rerun-if-changed={tty_source_dir}");
 
