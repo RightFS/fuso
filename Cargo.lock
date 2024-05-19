@@ -689,7 +689,6 @@ checksum = "b1a46d1a171d865aa5f83f92695765caa047a9b4cbae2cbf37dbd613a793fd4c"
 [[package]]
 name = "kcp-rust"
 version = "0.1.2"
-source = "git+https://github.com/editso/kcp-rust?branch=master#10485ea9ec1dfe5eb930c7fd5116339aea1183e5"
 dependencies = [
  "cc",
  "log",

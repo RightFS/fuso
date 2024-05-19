@@ -89,7 +89,7 @@ impl kcp_rust::Runner for UdpWithTokioRuntime {
                 }
                 e = process => {
                     if let Err(e) = e{
-                        log::debug!("kcp error {e:?}");
+                        log::debug!("kcp error {kind:?} {e:?}");
                     }
                 }
             }

@@ -3,38 +3,33 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use fuso::{
     cli,
     client::port_forward::{
-        MuxTransmitterConnector, PortForwarder, Protocol, TransmitterConnector,
+        Linker, MuxTransmitterConnector, PortForwarder, Protocol, TransmitterConnector,
     },
     config::{
         client::{
-            Config, FinalTarget, Host, ServerAddr, Service, WithBridgeService, WithForwardService,
+            Config, FinalTarget, Host, Service, WithBridgeService, WithForwardService,
             WithProxyService,
         },
-        Compress, Crypto, Expose, Stateful,
+        Expose, Stateful,
     },
     core::{
         accepter::AccepterExt,
-        connector::{
-            AbstractConnector, Connector, ConnectorWithFn, EncryptedAndCompressedConnector,
-            MultiConnector,
-        },
+        connector::{Connector, EncryptedAndCompressedConnector, MultiConnector},
         net::{KcpConnector, TcpListener, TcpStream},
         protocol::{AsyncPacketRead, AsyncPacketSend},
         rpc::{Decoder, Encoder},
         stream::{
-            compress::CompressedStream,
             fragment::Fragment,
             handshake::{Handshake, MuxConfig},
             UseCompress, UseCrypto,
         },
-        transfer::{AbstractTransmitter, TransmitterExt},
+        transfer::TransmitterExt,
         AbstractStream,
     },
     error,
     runner::{FnRunnable, NamedRunnable, Rise, ServiceRunner},
     runtime::tokio::{TokioRuntime, UdpWithTokioRuntime},
 };
-use serde::de;
 
 macro_rules! unsupport_protocol {
     () => {
@@ -86,6 +81,7 @@ macro_rules! try_connect {
 fn main() {
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Debug)
+        .filter_module("kcp_rust", log::LevelFilter::Trace)
         .init();
 
     match cli::client::parse() {
@@ -233,96 +229,10 @@ async fn enter_port_forward_service_main(
 
     loop {
         let (linker, target) = forwarder.accept().await?;
-
         tokio::spawn(async move {
-            log::debug!("target {:?}", target);
-
-            match target {
-                FinalTarget::Udp { addr, port } => {}
-                FinalTarget::Shell { path, args } => {
-                    let mut builder = fuso::pty::builder(path);
-
-                    builder.args(&args);
-
-                    let pty = builder.build().unwrap();
-
-                    if let Ok(a) = linker.link(Protocol::Tcp).await {
-                        a.transfer(pty).await.unwrap();
-                    };
-                }
-                FinalTarget::Dynamic => {
-                    let transmitter = linker.link(Protocol::Tcp).await.unwrap();
-
-                    let udp = Arc::new(tokio::net::UdpSocket::bind("0.0.0.0:0").await.unwrap());
-
-                    let (writer, mut reader) = transmitter.split();
-
-                    loop {
-                        let pkt = match reader.recv_packet().await {
-                            Err(_) => break,
-                            Ok(data) => data,
-                        };
-
-                        let pkt: Fragment = pkt.decode().unwrap();
-
-                        let udp = udp.clone();
-                        let mut writer = writer.clone();
-
-                        match pkt {
-                            Fragment::UdpForward {
-                                saddr,
-                                daddr,
-                                dport,
-                                data,
-                            } => {
-                                let target = format!("{}:{dport}", daddr.to_string());
-                                log::debug!("udp forward {saddr} -> {target}");
-                                udp.send_to(&data, target).await.unwrap();
-                                let mut buf = [0u8; 1400];
-                                let (n, addr) = udp.recv_from(&mut buf).await.unwrap();
-
-                                writer
-                                    .send_packet(
-                                        &Fragment::Udp(saddr, buf[..n].to_vec()).encode().unwrap(),
-                                    )
-                                    .await
-                                    .unwrap();
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                FinalTarget::Tcp { addr, port } => {
-                    let result = addr
-                        .try_connect(port, |host, port| async move {
-                            match host {
-                                Host::Ip(ip) => {
-                                    TcpStream::connect(SocketAddr::new(*ip, port)).await
-                                }
-                                Host::Domain(domain) => {
-                                    TcpStream::connect(format!("{domain}:{port}")).await
-                                }
-                            }
-                        })
-                        .await;
-
-                    match result {
-                        Ok(stream) => match linker.link(Protocol::Tcp).await {
-                            Ok(transmitter) => {
-                                transmitter.transfer(stream).await;
-                            }
-                            Err(e) => {
-                                log::debug!("{:?}", e);
-                            }
-                        },
-                        Err(e) => {
-                            if let Err(e) = linker.cancel(e).await {
-                                log::warn!("{:?}", e);
-                            };
-                        }
-                    }
-                }
-            }
+            if let Err(e) = do_forward(linker, target).await {
+                log::warn!("forward: {e:?}")
+            };
         });
     }
 }
@@ -403,4 +313,81 @@ async fn enter_bridge_service_main(
             };
         });
     }
+}
+
+async fn do_forward(linker: Linker, target: FinalTarget) -> error::Result<()> {
+    match target {
+        FinalTarget::Udp { .. } => {}
+        FinalTarget::Shell { path, args } => {
+            let mut builder = fuso::pty::builder(path);
+
+            builder.args(&args);
+
+            match builder.build() {
+                Err(e) => linker.cancel(e).await?,
+                Ok(pty) => {
+                    linker.link(Protocol::Tcp).await?.transfer(pty).await?;
+                }
+            }
+        }
+        FinalTarget::Tcp { addr, port } => {
+            let result = addr
+                .try_connect(port, |host, port| async move {
+                    log::debug!("connect to {host}:{port}");
+                    TcpStream::connect(format!("{host}:{port}")).await
+                })
+                .await;
+
+            match result {
+                Err(e) => linker.cancel(e).await?,
+                Ok(stream) => {
+                    linker.link(Protocol::Kcp).await?.transfer(stream).await?;
+                }
+            }
+        }
+        FinalTarget::Dynamic => {
+            let transmitter = linker.link(Protocol::Tcp).await?;
+
+            let udp = Arc::new(tokio::net::UdpSocket::bind("0.0.0.0:0").await?);
+
+            let (writer, mut reader) = transmitter.split();
+
+            loop {
+                let pkt = reader.recv_packet().await?;
+
+                let pkt: Fragment = pkt.decode()?;
+
+                let udp = udp.clone();
+
+                let mut writer = writer.clone();
+
+                match pkt {
+                    Fragment::UdpForward {
+                        saddr,
+                        daddr,
+                        dport,
+                        data,
+                    } => {
+                        let target = format!("{}:{dport}", daddr.to_string());
+                        log::debug!("udp forward {saddr} -> {target}");
+
+                        udp.send_to(&data, target).await?;
+
+                        let mut buf = [0u8; 1400];
+
+                        let _ =
+                            tokio::time::timeout(std::time::Duration::from_secs(2), async move {
+                                let (n, _) = udp.recv_from(&mut buf).await.unwrap();
+
+                                let pkt = Fragment::Udp(saddr, buf[..n].to_vec()).encode().unwrap();
+                                writer.send_packet(&pkt).await.unwrap();
+                            })
+                            .await;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(())
 }
