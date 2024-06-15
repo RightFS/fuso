@@ -7,17 +7,18 @@ use fuso::penetrate::PenetrateRsaAndAesHandshake;
 use fuso::FusoPenetrateConnector;
 use fuso::Socket;
 
+
 #[derive(Parser)]
 #[clap(author, version, about)]
 struct FusoArgs {
     /// 是否启用 kcp, 默认不启用
-    #[clap(long, default_value = "false", action = ArgAction::SetTrue, display_order=1)]
+    #[clap(long, default_value = "false", action = ArgAction::SetTrue, display_order = 1)]
     kcp: bool,
     /// 映射名称
     #[clap(short, long, default_value = "anonymous", display_order = 1)]
     name: String,
     /// 启用socks
-    #[clap(long, default_value = "false", action = ArgAction::SetTrue, display_order=2)]
+    #[clap(long, default_value = "false", action = ArgAction::SetTrue, display_order = 2)]
     socks: bool,
     /// 映射成功,实际访问端口
     #[clap(
@@ -61,7 +62,9 @@ struct FusoArgs {
     #[clap(long, default_value = "80", visible_alias = "fp", display_order = 8)]
     forward_port: u16,
     /// 是否启用socks5 udp转发, 默认不启用
-    #[clap(long, default_value = "false", visible_alias = "su", action = ArgAction::SetTrue, display_order=2)]
+    #[clap(
+        long, default_value = "false", visible_alias = "su", action = ArgAction::SetTrue, display_order = 2
+    )]
     socks_udp: bool,
     /// socks5账号
     #[clap(long, visible_alias = "s5u", display_order = 3)]
@@ -87,12 +90,14 @@ struct FusoArgs {
     /// 日志级别
     #[cfg(feature = "fuc-log")]
     #[cfg(debug_assertions)]
-    #[clap(long, default_value = "debug", display_order = 10, possible_values = ["info", "warn", "error", "debug", "trace", "off"])]
+    #[clap(long, default_value = "debug", display_order = 10)]
+    #[arg(value_enum)]
     /// 日志级别
     log_level: log::LevelFilter,
     #[cfg(not(debug_assertions))]
     #[cfg(feature = "fuc-log")]
-    #[clap(long, default_value = "info", display_order = 10, possible_values = ["info", "warn", "error", "debug", "trace", "off"])]
+    #[clap(long, default_value = "info", display_order = 10)]
+    #[arg(value_enum)]
     log_level: log::LevelFilter,
 }
 

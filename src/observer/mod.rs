@@ -126,7 +126,7 @@ where
                 "client": client,
                 "visit": visit,
                 "server": server,
-                "config": config
+                "config.toml": config
             },
         })]));
     }
@@ -146,7 +146,7 @@ where
                 "client": client,
                 "visit": visit,
                 "server": server,
-                "config": config
+                "config.toml": config
             }
         })]));
     }
@@ -164,7 +164,7 @@ where
             "data": {
                 "client": client,
                 "error": error.to_string(),
-                "config": config
+                "config.toml": config
             }
         })]));
     }

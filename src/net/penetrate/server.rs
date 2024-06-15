@@ -61,7 +61,7 @@ macro_rules! read_client_config {
             }
             return Err(e.to_string().into());
         } else {
-            log::debug!("recv client config ");
+            log::debug!("recv client config.toml ");
             let ok_msg = "YES".into_packet();
             let ok_msg = ok_msg.encode();
             if let Err(e) = $client.send_packet(&ok_msg).await {

@@ -1195,7 +1195,7 @@ where
 
     /// Set nodelay
     ///
-    /// fastest config: nodelay(true, 20, 2, true)
+    /// fastest config.toml: nodelay(true, 20, 2, true)
     ///
     /// `nodelay`: default is disable (false)
     /// `interval`: internal update timer interval in millisec, default is 100ms

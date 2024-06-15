@@ -1,7 +1,7 @@
 use std::{pin::Pin, task::Poll};
+use bytes::Buf;
 
-use rsa::{PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey};
-
+use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use crate::{guard::buffer::Buffer, AsyncRead, AsyncWrite, NetSocket, ReadBuf};
 
 use super::{Decrypt, Encrypt};
@@ -127,8 +127,7 @@ where
         buf: &[u8],
     ) -> std::task::Poll<crate::Result<usize>> {
         let mut rng = rand::thread_rng();
-        let ps = PaddingScheme::new_pkcs1v15_encrypt();
-        let encrypted_data = self.rsa_publ.encrypt(&mut rng, ps, buf)?;
+        let encrypted_data = self.rsa_publ.encrypt(&mut rng, Pkcs1v15Encrypt, buf)?;
         let encrypted_len = encrypted_data.len() as u32;
         let mut encrypted_buf = Vec::new();
 
@@ -192,9 +191,8 @@ where
                 self.rpos = 0;
                 self.dinit = false;
 
-                let ps = PaddingScheme::new_pkcs1v15_encrypt();
                 let rem = buf.remaining();
-                let decrypted = self.rsa_priv.decrypt(ps, &rbuf)?;
+                let decrypted = self.rsa_priv.decrypt(Pkcs1v15Encrypt, &rbuf)?;
 
                 if rem >= decrypted.len() {
                     unsafe {

@@ -15,7 +15,7 @@ pub trait PenetrateObserver {
         Self: Sized,
     {
         log::debug!(
-            "on_pen_start client: {}, visit: {}, server: {}, config: {:#?}",
+            "on_pen_start client: {}, visit: {}, server: {}, config.toml: {:#?}",
             client,
             visit,
             server,

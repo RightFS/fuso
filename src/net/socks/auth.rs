@@ -130,8 +130,8 @@ where
                         if *wpos == buf.len() && cmp_pass.is_none() && cmp_user.is_none() {
                             let mut buf = Vec::new();
                             buf.resize(2, 0);
-                            drop(std::mem::replace(rbuf, Some(buf)));
-                            drop(std::mem::replace(wbuf, None));
+                            let _ =std::mem::replace(rbuf, Some(buf));
+                            let _ = std::mem::replace(wbuf, None);
                         } else if *wpos == buf.len()
                             && cmp_pass.is_some()
                             && cmp_user.is_some()
@@ -213,11 +213,11 @@ where
                                 *wpos = 0;
                                 *good = true;
                                 do_next = true;
-                                drop(std::mem::replace(wbuf, Some([0x01, 0x00])));
+                                let _=std::mem::replace(wbuf, Some([0x01, 0x00]));
                             } else {
                                 *wpos = 0;
                                 do_next = true;
-                                drop(std::mem::replace(wbuf, Some([0x01, 0x01])));
+                                let _=std::mem::replace(wbuf, Some([0x01, 0x01]));
                             }
                         }
                         _ => {}
